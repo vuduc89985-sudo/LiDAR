@@ -1,0 +1,1274 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<title>LiDAR Master Viewer - Fusion 4 LiDAR (WEB)</title>
+<link rel="icon" href="data:,">
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+html,body { width:100%; height:100%; overflow:hidden; }
+body { background:#fff; color:#000; font-family:'Segoe UI',Tahoma,Arial,sans-serif; font-size:12px; }
+#toolbar {
+  background:#f7f7f7; border-bottom:1px solid #bbb; padding:4px 6px;
+  display:flex; flex-wrap:wrap; gap:4px; align-items:center;
+  position: relative; z-index: 1000; pointer-events: auto;
+}
+#toolbar button { background:#fff; color:#000; border:1px solid #888; border-radius:3px;
+  padding:3px 10px; font-size:12px; cursor:pointer; }
+#toolbar button:hover { background:#e6e6e6; }
+#toolbar button.active { background:#cfe4ff; border-color:#007bff; }
+#toolbar button.selLidar { background:#28a745; border-color:#1e7e34; color:#fff; }
+#toolbar button.black { background:#000; color:#fff; border-color:#000; }
+#toolbar button.blue { background:#007bff; color:#fff; border-color:#0056b3; }
+#toolbar label { color:#333; }
+#toolbar input { border:1px solid #888; border-radius:2px; padding:3px 4px; font-size:12px; background:#fff; color:#000; }
+#toolbar input.num { width:60px; }
+#connStatus { font-weight:bold; color:#c00; }
+#connStatus.on { color:#0a0; }
+#zoneToolbar {
+  display:none; background:#eef4fb; border-bottom:1px solid #bbb; padding:3px 6px;
+  gap:4px; align-items:center; flex-wrap:wrap;
+  position: relative; z-index: 1000; pointer-events: auto;
+}
+#zoneToolbar.show { display:flex; }
+#zoneToolbar button { background:#fff; border:1px solid #888; border-radius:3px; padding:2px 8px; cursor:pointer; }
+#zoneToolbar button.active { background:#007bff; color:#fff; }
+#zoneToolbar select { border:1px solid #888; padding:2px; }
+#canvasWrap { position:absolute; left:0; right:0; bottom:22px; }
+canvas { display:block; }
+#statusBar { position:fixed; left:0; right:0; bottom:0; height:22px; background:#f0f0f0;
+  border-top:1px solid #bbb; padding:3px 8px; font-size:12px; color:#000; white-space:nowrap; overflow:hidden; }
+#statusBar .ok { color:#0a0; } #statusBar .alarm { color:#c00; font-weight:bold; }
+#logPanel { position:fixed; right:4px; bottom:26px; width:460px; height:220px; background:#fff;
+  border:1px solid #888; box-shadow:2px 2px 6px rgba(0,0,0,.25); overflow-y:auto;
+  font-family:Consolas,monospace; font-size:11px; padding:4px; display:none; z-index:300; color:#000; }
+#logPanel.show { display:block; }
+#zoneList { position:fixed; right:6px; top:60px; width:250px; background:#fff; border:1px solid #888;
+  box-shadow:2px 2px 6px rgba(0,0,0,.25); display:none; z-index:250; max-height:50vh; overflow-y:auto; padding:4px; }
+#zoneList.show { display:block; }
+#zoneList .zi { padding:3px 6px; cursor:pointer; border-bottom:1px solid #eee; overflow:hidden; }
+#zoneList .zi:hover { background:#e8f1ff; }
+#zoneList .zi.sel { background:#cfe4ff; }
+#zoneList .zi button { float:right; border:1px solid #c00; background:#fdd; color:#c00;
+  border-radius:3px; cursor:pointer; font-size:10px; padding:0 5px; }
+#overlay { position:fixed; inset:0; background:rgba(0,0,0,.35); display:none; z-index:400; }
+#overlay.show { display:block; }
+#ipConfigPanel { position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); background:#fff;
+  border:1px solid #666; box-shadow:3px 3px 12px rgba(0,0,0,.4); padding:14px; z-index:450;
+  display:none; min-width:640px; border-radius:4px; color:#000; }
+#ipConfigPanel.show { display:block; }
+#ipConfigPanel h3 { margin-bottom:10px; font-size:14px; }
+#ipConfigPanel table { width:100%; border-collapse:collapse; }
+#ipConfigPanel th,#ipConfigPanel td { border:1px solid #bbb; padding:4px 6px; text-align:center; }
+#ipConfigPanel th { background:#f0f0f0; }
+#ipConfigPanel input { border:1px solid #888; padding:2px 4px; width:130px; }
+#ipConfigPanel input.port { width:60px; }
+#ipConfigPanel .btnRow { margin-top:10px; display:flex; gap:6px; justify-content:flex-end; }
+#ipConfigPanel .btnRow button { padding:4px 14px; border:1px solid #888; border-radius:3px; background:#fff; cursor:pointer; }
+#ipConfigPanel .btnRow button.green { background:#28a745; color:#fff; }
+#view3d {
+  position:absolute; inset:0; display:none; overflow:hidden;
+  z-index: 1;
+}
+#tools3d {position:absolute;top:8px;left:8px;right:8px;z-index:5;display:flex;flex-wrap:wrap;gap:8px;align-items:center;}
+#tools3d button,#tools3d input {padding:4px;}
+#panel3d {position:absolute;bottom:8px;left:8px;max-width:95%;max-height:40%;overflow:auto;padding:10px;background:#ffffffdd;border:1px solid #bbc;z-index:5;}
+#fusionSummary {white-space:pre-wrap;margin-bottom:8px;}
+</style>
+</head>
+<body>
+
+<div id="toolbar">
+  <span id="connStatus">Offline</span>
+  <input type="text" id="wsUrl" value="ws://localhost:9001" style="width:170px">
+  <button id="btnConnect">Ket noi</button>
+  <label>Sel:</label><span id="selBtns"></span>
+  <label>X (m):</label><input type="number" id="inpDx" class="num" step="0.1" value="0">
+  <label>Y (m):</label><input type="number" id="inpDy" class="num" step="0.1" value="0">
+  <label>Yaw (°):</label><input type="number" id="inpTh" class="num" step="0.5" value="0">
+  <label>Z / Height (m):</label><input id="inpZ" type="number" class="num" step="0.01" value="0">
+  <label>Roll (°):</label><input id="inpRoll" type="number" class="num" step="0.5" value="0">
+  <label>Pitch (°):</label><input id="inpPitch" type="number" class="num" step="0.5" value="0">
+  <button id="btn3d">3D Fusion</button>
+  <button id="btnApplyExtr" class="black">APPLY</button>
+  <button id="btnSaveCfg">SaveCfg</button>
+  <button id="btnPrintExtr">Print</button>
+  <button id="btnLatency">Latency</button>
+  <label>Trễ max(ms):</label><input type="number" id="inpLatMax" class="num" step="10" value="200" title="Ngưỡng trễ tối đa cho RTT/E2E">
+  <button id="btnShot">Shot</button>
+  <button id="btnFusion">SHOW FUSION</button>
+  <button id="btnSync">SYNC: OFF</button>
+  <button id="btnGrid">Polar Grid</button>
+  <button id="btnRays">Rays</button>
+  <button id="btnIntensity">Intensity</button>
+  <button id="btnAccum">Accumulate</button>
+  <button id="btnRuler">Ruler</button>
+  <button id="btnZone">Zone ▾</button>
+  <button id="btnClearZone">ClearZone</button>
+  <button id="btnCluster">Cluster</button>
+  <button id="btnPick">Pick R:0 T:0</button>
+  <button id="btnIcp">ICP Refine</button>
+  <label>true(m):</label><input type="number" id="inpTrue" class="num" step="0.1" value="1">
+  <button id="btnRmse" class="blue">RMSE@goc0</button>
+  <label>±(mm):</label><input type="number" id="inpTol" class="num" step="10" value="100" title="Sai số khoảng cách yêu cầu (mm)">
+  <button id="btnRec">REC</button>
+  <button id="btnPause">PAUSE</button>
+  <button id="btnLog">Log</button>
+  <button id="btnElev">📏 Độ cao</button>
+  <button id="btnIpConfig">⚙ IP Config</button>
+</div>
+
+<div id="zoneToolbar">
+  <label>Kieu zone:</label>
+  <button id="ztRect">▭ Rect</button>
+  <button id="ztPoly">⬠ Polygon</button>
+  <button id="ztCircle">◯ Circle</button>
+  <button id="ztSector">◔ Sector</button>
+  <button id="ztFree">✎ Freehand</button>
+  <button id="ztEdit">✋ Sửa đỉnh</button>
+  <button id="ztDel">🗑 Xóa zone chọn</button>
+  <button id="ztDone">✔ Hoàn tất</button>
+  <label>Scope:</label>
+  <select id="zoneScope"><option value="fusion">Fusion</option><option value="local">Local</option></select>
+  <span style="color:#666">(Mở Zone: chuột thường • Bấm 1 hình để chọn, bấm lại để bỏ chọn • Polygon: chuột phải/Enter đóng • Freehand: giữ chuột kéo • Chuột phải vào zone = xóa riêng • Delete = xóa zone chọn • Zone vẽ khi SYNC ON = đồng bộ vĩnh viễn)</span>
+</div>
+
+<div id="canvasWrap"><canvas id="mainCanvas"></canvas>
+<div id="view3d"><div id="tools3d">
+<button data-camera="Perspective">Reset camera</button><button data-camera="Top">Top View</button><button data-camera="Front">Front View</button><button data-camera="Side">Side View</button><button data-camera="Perspective">Perspective View</button>
+<label><input id="scanPlanes" type="checkbox" checked> Show Scan Planes</label>
+<label>Point Size <input id="pointSize3d" type="number" min="1" max="20" value="3" style="width:50px"></label>
+<label>Render every N-th point <input id="decimation3d" type="number" min="1" max="100" value="1" style="width:50px"></label>
+<label>Fusion tolerance (ms) <input id="fusionDelta" type="number" min="0" max="10000" value="100" style="width:65px"></label>
+</div><div id="panel3d"><b>3D Fusion — các lát quét 2D</b><div id="fusionSummary"></div><div id="layers3d"></div></div></div></div>
+<div id="statusBar"></div>
+<div id="logPanel"></div>
+<div id="zoneList"><b>Danh sách Zone</b><div id="zoneListItems"></div></div>
+<div id="overlay"></div>
+<div id="ipConfigPanel">
+  <h3>⚙ Cấu hình LiDAR (IP / Port / Tên)</h3>
+  <table><thead><tr><th>#</th><th>Tên</th><th>IP Address</th><th>Port</th><th>Trạng thái</th><th>Áp dụng</th><th>Web hãng</th><th>Ping</th><th>Xóa</th></tr></thead>
+  <tbody id="ipTableBody"></tbody></table>
+  <div style="margin-top:8px;color:#555;font-size:11px;">
+    🌐 "Mở" = mở trang cấu hình hãng của LiDAR đó (http://IP) — đăng nhập <b>browser / 123456</b> để đổi
+    tần số quét 25/50/100 Hz, phân giải góc, dải góc... Sau khi đổi bấm <b>Save → Parameters Take Effect</b>
+    (một số thay đổi cần khởi động lại LiDAR). 📶 = đo thời gian phản hồi 1 gói tin (ICMP).
+    Máy tính phải cùng lớp mạng 192.168.201.x với LiDAR.
+  </div>
+  <div class="btnRow">
+    <button id="btnAddLidar" class="green">+ Thêm LiDAR</button>
+    <button id="btnCloseIpCfg">Đóng</button>
+  </div>
+</div>
+
+<script src="js/websocket3d.js"></script>
+<script type="module" src="js/lidar3d.js"></script>
+<script>
+'use strict';
+const PI = Math.PI;
+
+// ================= KHAI BÁO BIẾN TOÀN CỤC (CHỈ 1 LẦN DUY NHẤT) =================
+let ws = null;
+let connected = false;
+let paused = false;
+let viewer3d = null;
+let show3d = false;
+const pendingFusion = new LidarProtocol.FusionFrames();
+
+let showFusion = false;
+let syncMode = false;
+let gridPolar = false;
+let showElevation = false;
+let rayMode = false;
+let intensityMode = false;
+let accumulateMode = false;
+let rulerMode = false;
+let zoneMode = false;
+let pickMode = false;
+let zoneEdit = false;
+let selLidar = 0;
+let lidarCount = 4;
+let extrinsics = [];
+let lidarNames = [];
+let ipTableOrig = {};
+let hist = {};
+let viewOffset = 0;
+let fpsCount = 0;
+let lastFpsT = performance.now();
+let curFps = 0;
+let zoneTool = null;
+let zones = [];
+let zoneNextId = 1;
+let zoneSelected = -1;
+let zoneVerts = [];
+let freehandPts = [];
+let isFreeDrawing = false;
+let zoneDragging = false;
+let zoneDragIdx = -1;
+let wipPanel = -1;
+let rulerItems = [];
+let rulerActive = {};
+let pickRef = [];
+let pickTarget = [];
+let latency = { RTT: null, E2E: null };
+let latencyWarn = { RTT: false, E2E: false };
+let rmseVerdict = null;
+let alarmOn = false;
+let audioCtx = null;
+
+// Gắn các biến cần chia sẻ với lidar3d.js vào window
+window.rulerMode = rulerMode;
+window.zoneMode = zoneMode;
+window.pickMode = pickMode;
+window.zoneTool = zoneTool;
+window.zones = zones;
+window.zoneNextId = zoneNextId;
+window.zoneSelected = zoneSelected;
+window.selLidar = selLidar;
+window.lidarCount = lidarCount;
+window.extrinsics = extrinsics;
+window.lidarNames = lidarNames;
+
+const canvas = document.getElementById('mainCanvas');
+const ctx = canvas.getContext('2d');
+let W = 0, H = 0;
+let views = [];
+const COLORS = ['#1f77b4','#e37702','#2ca02c','#9467bd','#d62728','#17becf','#8c564b','#e377b4','#7f7f7f','#bcbd22','#4a4aff','#20b2aa','#ff6347','#6b8e23','#9932cc','#ff8c00'];
+
+function resize(){
+  const top = document.getElementById('toolbar').offsetHeight +
+    (zoneMode ? document.getElementById('zoneToolbar').offsetHeight : 0);
+  document.getElementById('canvasWrap').style.top = top + 'px';
+  // Bang "Danh sach Zone" phai nam duoi toolbar/zoneToolbar thuc te, khong duoc de gia tri
+  // top co dinh vi toolbar co the xuong nhieu dong tuy do rong man hinh.
+  document.getElementById('zoneList').style.top = (top + 8) + 'px';
+  W = window.innerWidth; H = window.innerHeight - 22 - top;
+  canvas.width = W; canvas.height = H;
+}
+window.addEventListener('resize', resize);
+function ensureViews(n){ while (views.length < n) views.push({zoom:8, panX:0, panY:0}); }
+
+// ===== BO CUC: FUSION OFF = 2x2; FUSION ON = fusion trai lon + 2x2 phai =====
+function getPanels(){
+  const out = [];
+  if (!showFusion){
+    const cols = 2, rows = Math.ceil(lidarCount / cols);
+    const cw = Math.floor(W / cols), rh = Math.floor(H / rows);
+    for (let i = 0; i < lidarCount; i++)
+      out.push({ idx:i, fusion:false, x:(i%cols)*cw, y:Math.floor(i/cols)*rh, w:cw, h:rh });
+  } else {
+    const leftW = Math.floor(W * 0.62);
+    out.push({ idx:lidarCount, fusion:true, x:0, y:0, w:leftW, h:H });
+    const rw = W - leftW, cw = Math.floor(rw/2), rh = Math.floor(H/2);
+    for (let i = 0; i < lidarCount; i++)
+      out.push({ idx:i, fusion:false, x:leftW+(i%2)*cw, y:Math.floor(i/2)*rh, w:cw, h:rh });
+  }
+  ensureViews(lidarCount + 1);
+  return out;
+}
+
+// ================= WEBSOCKET =================
+function connectWS(){
+  const url = document.getElementById('wsUrl').value || 'ws://localhost:9001';
+  try { ws = new WebSocket(url); } catch(e){ addLog('[WEB] URL sai: '+url); return; }
+  ws.binaryType = 'arraybuffer';
+  ws.onopen = () => { connected = true; hist={};pendingFusion.clear();viewer3d?.clear();
+    const s = document.getElementById('connStatus'); s.textContent='Online'; s.classList.add('on');
+    ws.send(JSON.stringify({cmd:'get_state'})); ws.send(JSON.stringify({cmd:'lidar_get_config'}));
+    addLog('[WEB] Da ket noi '+url); };
+  ws.onclose = () => { connected = false;
+    const s = document.getElementById('connStatus'); s.textContent='Offline'; s.classList.remove('on');
+    setTimeout(connectWS, 2000); };
+  ws.onmessage = (ev) => { (ev.data instanceof ArrayBuffer) ? onBinary(ev.data) : onJson(JSON.parse(ev.data)); };
+}
+function onBinary(buf){
+  const f=LidarProtocol.parse(buf); if(!f)return;
+  const src=f.sourceId;
+  (viewer3d?viewer3d.fusion:pendingFusion).push(f);
+  if (!hist[src]) hist[src] = [];
+  hist[src].push(f);
+  if (hist[src].length > 500) hist[src].shift();
+  fpsCount++;
+}
+function getFrame(src){
+  const h = hist[src]; if (!h || !h.length) return null;
+  let i = h.length - 1 - viewOffset; if (i<0) i=0; if (i>=h.length) i=h.length-1;
+  return h[i];
+}
+function onJson(j){
+  switch(j.type){
+    case 'events':
+      paused = j.paused; if (!paused) viewOffset = 0;
+      document.getElementById('btnPause').classList.toggle('active', paused);
+      document.getElementById('btnRec').classList.toggle('active', j.recording);
+      document.getElementById('btnCluster').classList.toggle('active', j.clusterMode);
+      alarmOn = j.confirmed > 0; if (alarmOn) beep();
+      window._ev = j; break;
+    case 'extr':
+      if(hist[j.id])hist[j.id]=hist[j.id].map(f=>LidarProtocol.reproject(f,j));
+      (viewer3d?viewer3d.fusion:pendingFusion).reproject(j.id,j);
+      if (extrinsics[j.id]) Object.assign(extrinsics[j.id], j); else extrinsics[j.id] = j;
+      if (j.id === selLidar){ document.getElementById('inpDx').value=(+j.dx).toFixed(2); document.getElementById('inpDy').value=(+j.dy).toFixed(2); document.getElementById('inpTh').value=(+j.thetaDeg).toFixed(1); document.getElementById('inpZ').value=(j.z||0).toFixed(3);document.getElementById('inpRoll').value=(j.roll||0).toFixed(2);document.getElementById('inpPitch').value=(j.pitch||0).toFixed(2); }
+      break;
+    case 'state': if (j.lidars){ lidarCount = j.lidars.length; extrinsics = j.lidars; lidarNames = j.lidars.map(L=>L.name); window.lidarCount=lidarCount; window.extrinsics=extrinsics; window.lidarNames=lidarNames; buildSel(); } break;
+    case 'lidar_config': if (j.lidars){
+      const identity=j.lidars.map(l=>l.ip+':'+l.port).join('|');
+      if(window._lidarIdentity!==undefined&&window._lidarIdentity!==identity){hist={};pendingFusion.clear();viewer3d?.clear();}
+      window._lidarIdentity=identity; lidarCount = j.count; extrinsics = j.lidars; lidarNames = j.lidars.map(L=>L.name); window.lidarCount=lidarCount; window.extrinsics=extrinsics; window.lidarNames=lidarNames; buildSel(); updateIpTable(j.lidars); } break;
+    case 'latency': {
+      latency[j.tag] = j.last;
+      addLog('[LATENCY '+j.tag+'] last='+j.last.toFixed(2)+'ms min='+j.min.toFixed(2)+' max='+j.max.toFixed(2)+' TB='+j.avg.toFixed(2)+' n='+j.n);
+      const thr = parseFloat(document.getElementById('inpLatMax').value) || 0;
+      if (thr > 0){
+        const over = j.last > thr;
+        latencyWarn[j.tag] = over;
+        if (over) addLog('[CANH BAO] '+j.tag+' VUOT NGUONG: '+j.last.toFixed(2)+' ms > '+thr.toFixed(0)+' ms');
+      }
+      break;
+    }
+    case 'rmse': {
+      addLog('[RMSE] mean='+j.mean.toFixed(4)+' rmse='+j.rmse.toFixed(4)+' std='+j.std.toFixed(4)+' true='+j.true);
+      const tolMM = parseFloat(document.getElementById('inpTol').value) || 0;
+      if (tolMM > 0){
+        const tol = tolMM / 1000;
+        const pass = (Math.abs(j.mean) <= tol) && (j.rmse <= tol);
+        rmseVerdict = { pass, tolMM };
+        addLog('[RMSE] KET QUA: '+(pass?'DAT':'KHONG DAT')+'  (|TB|='+Math.abs(j.mean).toFixed(4)+'m, RMSE='+j.rmse.toFixed(4)+'m  vs  nguong '+tol.toFixed(3)+'m)');
+        if (!pass) beep();
+      } else rmseVerdict = null;
+      break;
+    }
+    case 'ping': {
+      const el = document.getElementById('ping_'+j.id);
+      if (el) el.textContent = (j.ms >= 0) ? j.ms+' ms' : 'timeout';
+      addLog('[PING] '+j.ip+': '+(j.ms>=0 ? j.ms+' ms' : 'timeout (mat goi)'));
+      break;
+    }
+    case 'icp': addLog('[ICP] RMS '+j.rmsBefore.toFixed(3)+' -> '+j.rmsAfter.toFixed(3)+' dx='+j.dx.toFixed(3)+' dy='+j.dy.toFixed(3)+' th='+j.thetaDeg.toFixed(2)); break;
+    case 'log': addLog(j.text); break;
+  }
+}
+function beep(){ try{
+  if (!audioCtx) audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+  const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+  o.connect(g); g.connect(audioCtx.destination); o.frequency.value=880; g.gain.value=0.2;
+  o.start(); o.stop(audioCtx.currentTime+0.15);
+}catch(e){} }
+function addLog(t){
+  const lp = document.getElementById('logPanel');
+  const d = document.createElement('div'); d.textContent = new Date().toLocaleTimeString()+' | '+t;
+  lp.appendChild(d); while (lp.children.length>300) lp.removeChild(lp.firstChild);
+  lp.scrollTop = lp.scrollHeight;
+}
+function buildSel(){
+  const c = document.getElementById('selBtns'); c.innerHTML='';
+  for (let i=0;i<lidarCount;i++){
+    const b = document.createElement('button');
+    b.textContent = 'L'+(i+1);
+    if (i===selLidar) b.className='selLidar';
+    b.onclick = () => { selLidar=i; window.selLidar=selLidar; buildSel(); send({cmd:'select',id:i}); };
+    c.appendChild(b);
+  }
+}
+
+// ================= TOA DO MAN HINH <-> THE GIOI (theo tung khung) =================
+function s2w(v, r, sx, sy){ const cx=r.x+r.w/2, cy=r.y+r.h/2;
+  return [ (sx-cx)/v.zoom + v.panX, -(sy-cy)/v.zoom + v.panY ]; }
+function w2s(v, r, wx, wy){ const cx=r.x+r.w/2, cy=r.y+r.h/2;
+  return [ cx+(wx-v.panX)*v.zoom, cy-(wy-v.panY)*v.zoom ]; }
+
+// ================= PIPELINE CHUYEN DOI TOA DO LOCAL <-> WORLD (theo extrinsics tung LiDAR) =================
+// Panel index (vi tri hien thi 0..lidarCount-1) khong nhat thiet trung sourceId thuc te cua LiDAR
+// (LiDAR co the doi thu tu / id trong extrinsics). Cac ham duoi day dam bao Zone/diem luon duoc
+// anh xa dung LiDAR nguon bat ke thu tu hien thi panel thay doi the nao.
+function zoneSourceId(zone){
+  // Nullish checks co chu y giu nguyen sourceId === 0 (LiDAR 1).
+  const raw=zone.sourceId ?? zone.panel ?? zone.li ?? 0;
+  const sourceId=Number(raw);
+  return Number.isInteger(sourceId) && sourceId>=0 && sourceId<lidarCount ? sourceId : 0;
+}
+function panelSourceId(panel){
+  if (!panel || panel.fusion) return null;
+  const lidar=extrinsics[panel.idx];
+  return Number.isInteger(lidar?.id) ? lidar.id : panel.idx;
+}
+function selectedSourceId(){ return panelSourceId({idx:selLidar,fusion:false}); }
+function lidarExtrinsic2D(sourceId){
+  const e=extrinsics.find(item=>item?.id===sourceId) || extrinsics[sourceId] || {};
+  const theta=Number.isFinite(+e.thetaDeg) ? +e.thetaDeg*PI/180 :
+    (Number.isFinite(+e.yaw) ? +e.yaw*PI/180 : (+e.oth||0));
+  return {dx:+(e.dx??e.x) || 0, dy:+(e.dy??e.y) || 0, theta};
+}
+// Dung dung transform runtime nhu strokePoints() moi khi co frame.
+function pointCloudTransform2D(sourceId){
+  const f=getFrame(sourceId);
+  if (f && Number.isFinite(f.ox) && Number.isFinite(f.oy) && Number.isFinite(f.oth))
+    return {dx:f.ox, dy:f.oy, theta:f.oth};
+  return lidarExtrinsic2D(sourceId);
+}
+// Chuyen toa do local cua 1 LiDAR sang khung Fusion (2D world).
+function localToWorld2D(x, y, sourceId){
+  const e=pointCloudTransform2D(sourceId), ct=Math.cos(e.theta), st=Math.sin(e.theta);
+  return {x:e.dx+x*ct-y*st, y:e.dy+x*st+y*ct};
+}
+function worldToLocal2D(x, y, sourceId){
+  const e=pointCloudTransform2D(sourceId), ct=Math.cos(e.theta), st=Math.sin(e.theta);
+  const dx=x-e.dx, dy=y-e.dy;
+  return {x:dx*ct+dy*st, y:-dx*st+dy*ct};
+}
+function localPointBetweenLidars(sourceId,targetId,x,y){
+  const world=localToWorld2D(x,y,sourceId);
+  return worldToLocal2D(world.x,world.y,targetId);
+}
+
+// ================= RENDER =================
+let accCv = {}, accSig = {}, accLast = {};
+function render(){
+  if(show3d&&viewer3d){
+    viewer3d.update(Array.from({length:lidarCount},(_,i)=>lidarNames[i]||"LiDAR "+(i+1)),extrinsics,paused,window._ev);
+    updateStatusBar();
+    requestAnimationFrame(render);
+    return;
+  }
+  ctx.fillStyle = '#fff'; ctx.fillRect(0,0,W,H);
+  const panels = getPanels();
+  for (const p of panels){
+    const v = views[p.idx];
+    ctx.save(); ctx.beginPath(); ctx.rect(p.x,p.y,p.w,p.h); ctx.clip();
+    ctx.fillStyle = '#fff'; ctx.fillRect(p.x,p.y,p.w,p.h);
+    drawGrid(p, v);
+    drawBlindWedge(p, v);
+    if (p.fusion){ for (let i=0;i<lidarCount;i++){ const sourceId=panelSourceId({idx:i,fusion:false}),f=getFrame(sourceId); if (f) drawPoints(p,v,f,sourceId); } }
+    else { const sourceId=panelSourceId(p), f=getFrame(sourceId); if (f) drawPoints(p,v,f,sourceId); }
+    drawClustersTargets(p,v);
+    drawZones(p,v);
+    drawZoneWIP(p,v);
+    drawRuler(p,v);
+    drawHeader(p,v);
+    ctx.restore();
+    ctx.strokeStyle = '#999'; ctx.strokeRect(p.x+0.5,p.y+0.5,p.w-1,p.h-1);
+  }
+
+  if (showElevation) drawElevationScale();
+
+      const now = performance.now();
+  if (now - lastFpsT > 1000){ curFps = Math.round(fpsCount*1000/(now-lastFpsT)); fpsCount=0; lastFpsT=now; }
+  updateStatusBar();
+  requestAnimationFrame(render);
+}
+
+function updateStatusBar(){
+  const ev = window._ev || {};
+  document.getElementById('statusBar').innerHTML =
+    'Mode: '+lidarCount+' LiDAR | Sel: L'+(selLidar+1)+' | Grid: '+(gridPolar?'Polar':'Cartesian')+
+    ' | Draw: '+(rayMode?'Rays':'Points')+' | FPS: '+curFps+' | Fusion: '+(showFusion?'ON':'OFF')+
+    ' | Zones: '+zones.length+' | <span class="'+(alarmOn?'alarm':'ok')+'">'+(alarmOn?'⚠ CANH BAO':'AN TOAN')+'</span>'+
+    (ev.occlusion?' | <span class="alarm">⚠ OCCLUSION</span>':'')+
+    ' | RTT: <span style="color:'+(latencyWarn.RTT?'#c00;font-weight:bold':'inherit')+'">'+(latency.RTT!=null?latency.RTT.toFixed(2)+'ms':'--')+'</span>'+
+    ' | E2E: <span style="color:'+(latencyWarn.E2E?'#c00;font-weight:bold':'inherit')+'">'+(latency.E2E!=null?latency.E2E.toFixed(2)+'ms':'--')+'</span>'+
+    (rmseVerdict?(' | RMSE@goc0: <span style="color:'+(rmseVerdict.pass?'#0a0':'#c00')+';font-weight:bold">'+(rmseVerdict.pass?'DAT':'KHONG DAT')+' (±'+rmseVerdict.tolMM+'mm)</span>'):'')+
+    (paused?' | <b>PAUSED (←/→ tua)</b>':'');
+}
+
+// Tach rieng de dung chung cho ca 2D va 3D (truoc day bi return som o nhanh 3D nen khong chay)
+function updateStatusBar(){
+  const ev = window._ev || {};
+  document.getElementById('statusBar').innerHTML =
+    'Mode: '+lidarCount+' LiDAR | Sel: L'+(selLidar+1)+' | Grid: '+(gridPolar?'Polar':'Cartesian')+
+    ' | Draw: '+(rayMode?'Rays':'Points')+' | FPS: '+curFps+' | Fusion: '+(showFusion?'ON':'OFF')+
+    ' | Zones: '+zones.length+' | <span class="'+(alarmOn?'alarm':'ok')+'">'+(alarmOn?'⚠ CANH BAO':'AN TOAN')+'</span>'+
+    (ev.occlusion?' | <span class="alarm">⚠ OCCLUSION</span>':'')+
+    ' | RTT: <span style="color:'+(latencyWarn.RTT?'#c00;font-weight:bold':'inherit')+'">'+(latency.RTT!=null?latency.RTT.toFixed(2)+'ms':'--')+'</span>'+
+    ' | E2E: <span style="color:'+(latencyWarn.E2E?'#c00;font-weight:bold':'inherit')+'">'+(latency.E2E!=null?latency.E2E.toFixed(2)+'ms':'--')+'</span>'+
+    (rmseVerdict?(' | RMSE@goc0: <span style="color:'+(rmseVerdict.pass?'#0a0':'#c00')+';font-weight:bold">'+(rmseVerdict.pass?'DAT':'KHONG DAT')+' (±'+rmseVerdict.tolMM+'mm)</span>'):'')+
+    (paused?' | <b>PAUSED (←/→ tua)</b>':'');
+}
+
+// ================= THANG DO CAO (tinh nang moi tu Code 2) =================
+function drawElevationScale(){
+  let zMax = 0;
+  const zValues = [];
+  for (let i = 0; i < lidarCount; i++){
+    const z = extrinsics[i] && extrinsics[i].z !== undefined ? extrinsics[i].z : 0;
+    zValues.push(z);
+    if (z > zMax) zMax = z;
+    if (z < 0 && -z > zMax) zMax = -z;
+  }
+  if (zMax === 0) zMax = 5;
+  const SCALE_LEVELS = [5, 10, 20, 50, 100, 200, 500, 1000, 2000];
+  let maxElev = SCALE_LEVELS[SCALE_LEVELS.length - 1];
+  for (const lv of SCALE_LEVELS){
+    if (zMax <= lv * 0.9){ maxElev = lv; break; }
+  }
+  if (maxElev < zMax * 1.2){
+    for (const lv of SCALE_LEVELS){
+      if (lv >= zMax * 1.2){ maxElev = lv; break; }
+    }
+  }
+  let stepMajor, stepMinor;
+  if (maxElev <= 10){ stepMajor = 2; stepMinor = 1; }
+  else if (maxElev <= 50){ stepMajor = 10; stepMinor = 5; }
+  else if (maxElev <= 200){ stepMajor = 50; stepMinor = 10; }
+  else if (maxElev <= 1000){ stepMajor = 200; stepMinor = 100; }
+  else { stepMajor = 500; stepMinor = 100; }
+  const barW = 110;
+  const barX = W - barW - 10;
+  const barY = 80;
+  const barH = H - 120;
+  ctx.save();
+  ctx.fillStyle = 'rgba(255,255,255,0.95)';
+  ctx.strokeStyle = '#333';
+  ctx.lineWidth = 2;
+  ctx.fillRect(barX - 5, barY - 28, barW + 10, barH + 55);
+  ctx.strokeRect(barX - 5, barY - 28, barW + 10, barH + 55);
+  ctx.fillStyle = '#000';
+  ctx.font = 'bold 12px Segoe UI';
+  ctx.textAlign = 'center';
+  ctx.fillText('ĐỘ CAO (m)', barX + barW / 2, barY - 12);
+  ctx.font = '10px Segoe UI';
+  ctx.fillStyle = '#555';
+  ctx.fillText('thang: 0 - ' + maxElev + ' m', barX + barW / 2, barY - 2);
+  ctx.strokeStyle = '#666';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(barX + barW / 2, barY);
+  ctx.lineTo(barX + barW / 2, barY + barH);
+  ctx.stroke();
+  ctx.font = '10px Segoe UI';
+  ctx.fillStyle = '#333';
+  ctx.lineWidth = 1;
+  for (let elev = 0; elev <= maxElev; elev += stepMinor){
+    const y = barY + barH - (elev / maxElev) * barH;
+    const isMajor = (elev % stepMajor === 0);
+    ctx.strokeStyle = isMajor ? '#444' : '#bbb';
+    ctx.lineWidth = isMajor ? 1.5 : 0.8;
+    const tickLen = isMajor ? 10 : 5;
+    ctx.beginPath();
+    ctx.moveTo(barX + barW / 2 - tickLen, y);
+    ctx.lineTo(barX + barW / 2 + tickLen, y);
+    ctx.stroke();
+    if (isMajor){
+      ctx.textAlign = 'right';
+      ctx.fillStyle = '#222';
+      ctx.font = 'bold 10px Segoe UI';
+      ctx.fillText(elev.toString(), barX + barW / 2 - 14, y + 3);
+    }
+  }
+  for (let i = 0; i < lidarCount; i++){
+    const z = zValues[i];
+    const y = barY + barH - (z / maxElev) * barH;
+    const col = COLORS[i % COLORS.length];
+    ctx.strokeStyle = col;
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([4, 3]);
+    ctx.beginPath();
+    ctx.moveTo(barX + 8, y);
+    ctx.lineTo(barX + barW - 8, y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = col;
+    ctx.beginPath();
+    ctx.arc(barX + barW / 2, y, 6, 0, 2 * PI);
+    ctx.fill();
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.fillStyle = '#000';
+    ctx.font = 'bold 10px Segoe UI';
+    ctx.textAlign = 'left';
+    const label = 'L' + (i + 1) + ' ' + z.toFixed(2) + 'm';
+    ctx.fillText(label, barX + barW / 2 + 14, y + 4);
+  }
+  ctx.restore();
+}
+
+function drawGrid(p, v){
+  ctx.strokeStyle = '#ddd'; ctx.fillStyle = '#888'; ctx.lineWidth = 1; ctx.font = '10px Segoe UI';
+  if (!gridPolar){
+    let step = 10; if (step*v.zoom > 250) step = 2; if (step*v.zoom < 40) step = 20;
+    const [wx0,wy1] = s2w(v,p,p.x,p.y), [wx1,wy0] = s2w(v,p,p.x+p.w,p.y+p.h);
+    for (let gx=Math.floor(wx0/step)*step; gx<=wx1; gx+=step){
+      const sx = w2s(v,p,gx,0)[0];
+      ctx.beginPath(); ctx.moveTo(sx,p.y); ctx.lineTo(sx,p.y+p.h); ctx.stroke();
+      ctx.fillText(gx.toFixed(1), sx+2, p.y+12);
+    }
+    for (let gy=Math.floor(wy0/step)*step; gy<=wy1; gy+=step){
+      const sy = w2s(v,p,0,gy)[1];
+      ctx.beginPath(); ctx.moveTo(p.x,sy); ctx.lineTo(p.x+p.w,sy); ctx.stroke();
+      ctx.fillText(gy.toFixed(1), p.x+3, sy-2);
+    }
+  } else {
+    const [ox,oy] = w2s(v,p,0,0);
+    for (let r=10;r<=100;r+=10){
+      ctx.beginPath(); ctx.arc(ox,oy,r*v.zoom,0,2*PI); ctx.stroke();
+      ctx.fillText(r+'m', ox+r*v.zoom+2, oy-2);
+    }
+    for (let a=0;a<360;a+=45){
+      const rad=a*PI/180;
+      ctx.beginPath(); ctx.moveTo(ox,oy);
+      ctx.lineTo(ox+Math.cos(rad)*120*v.zoom, oy-Math.sin(rad)*120*v.zoom); ctx.stroke();
+      ctx.fillText(a+'°', ox+Math.cos(rad)*105*v.zoom, oy-Math.sin(rad)*105*v.zoom);
+    }
+  }
+}
+
+function drawBlindWedge(p, v){
+  const f = getFrame(p.fusion ? 0 : panelSourceId(p)); if (!f) return;
+  const [ox,oy] = w2s(v,p,p.fusion?f.ox:0,p.fusion?f.oy:0);
+  ctx.fillStyle = 'rgba(0,0,0,0.10)';
+  ctx.beginPath(); ctx.moveTo(ox,oy);
+  ctx.arc(ox,oy, f.rMax*v.zoom, -f.aMax, -(f.aMin+2*PI));
+  ctx.closePath(); ctx.fill();
+}
+
+function drawPoints(p, v, f, srcIdx){
+  const col = COLORS[srcIdx % COLORS.length];
+  if (accumulateMode && !rayMode && !paused){
+    const sig = p.idx+':'+v.zoom.toFixed(3)+':'+v.panX.toFixed(2)+':'+v.panY.toFixed(2)+':'+p.w+'x'+p.h;
+    if (!accCv[p.idx] || accSig[p.idx] !== sig){
+      accCv[p.idx] = accCv[p.idx] || document.createElement('canvas');
+      accCv[p.idx].width = p.w; accCv[p.idx].height = p.h;
+      accSig[p.idx] = sig; accLast[p.idx] = {};
+      accCv[p.idx].getContext('2d').clearRect(0,0,p.w,p.h);
+    }
+    const ac = accCv[p.idx].getContext('2d');
+    if (accLast[p.idx][srcIdx] !== f.frameId){
+      accLast[p.idx][srcIdx] = f.frameId;
+      strokePoints(ac, f, v, {x:0,y:0,w:p.w,h:p.h,fusion:p.fusion}, col, 0.35);
+    }
+    ctx.drawImage(accCv[p.idx], p.x, p.y);
+    strokePoints(ctx, f, v, p, col, 1);
+    return;
+  }
+  strokePoints(ctx, f, v, p, col, 1);
+}
+function strokePoints(g, f, v, p, col, alpha){
+  const cx=p.x+p.w/2, cy=p.y+p.h/2;
+  const ct=Math.cos(f.oth), st=Math.sin(f.oth);
+  // Khung Fusion ve theo toa do the gioi; moi khung LiDAR rieng ve theo toa do local cua chinh no.
+  const originX=p.fusion?f.ox:0, originY=p.fusion?f.oy:0;
+  const ox=cx+(originX-v.panX)*v.zoom, oy=cy-(originY-v.panY)*v.zoom;
+  g.globalAlpha = alpha;
+  for (let i=0;i<f.pts.length;i+=3){
+    const lx=f.pts[i], ly=f.pts[i+1], it=f.pts[i+2];
+    const gx=p.fusion?(f.xyz?f.xyz[i]:lx*ct-ly*st+f.ox):lx;
+    const gy=p.fusion?(f.xyz?f.xyz[i+1]:lx*st+ly*ct+f.oy):ly;
+    const sx=cx+(gx-v.panX)*v.zoom, sy=cy-(gy-v.panY)*v.zoom;
+    if (sx<p.x-2||sx>p.x+p.w+2||sy<p.y-2||sy>p.y+p.h+2) continue;
+    if (intensityMode){
+      const t=Math.min(it/255,1);
+      g.fillStyle='rgb('+Math.floor(t*255)+','+Math.floor((1-t)*200)+',0)';
+    } else g.fillStyle=col;
+    if (rayMode && alpha===1){
+      g.strokeStyle=g.fillStyle; g.beginPath(); g.moveTo(ox,oy); g.lineTo(sx,sy); g.stroke();
+    }
+    g.fillRect(sx-1, sy-1, 2, 2);
+  }
+  g.globalAlpha = 1;
+  g.fillStyle='#d00'; g.fillRect(ox-3, oy-3, 6, 6);
+}
+
+function drawClustersTargets(p, v){
+  const ev = window._ev; if (!ev) return;
+  if (ev.clusterMode && ev.boxes){
+    ctx.strokeStyle='#e67e00'; ctx.lineWidth=1.5; ctx.fillStyle='#e67e00'; ctx.font='11px Segoe UI';
+    for (const b of ev.boxes){
+      const p1 = p.fusion ? {x:b.x1, y:b.y1} : worldToLocal2D(b.x1, b.y1, panelSourceId(p));
+      const p2 = p.fusion ? {x:b.x2, y:b.y2} : worldToLocal2D(b.x2, b.y2, panelSourceId(p));
+      const [sx1,sy1]=w2s(v,p,p1.x,p1.y), [sx2,sy2]=w2s(v,p,p2.x,p2.y);
+      ctx.strokeRect(Math.min(sx1,sx2),Math.min(sy1,sy2),Math.abs(sx2-sx1),Math.abs(sy2-sy1));
+    }
+    if (ev.nearest < 1e8) ctx.fillText('Gan nhat: '+ev.nearest.toFixed(2)+' m | Obj: '+ev.nObj, p.x+6, p.y+p.h-8);
+  }
+  if (ev.targets){
+    for (const t of ev.targets){
+      if (t.age < 3) continue;
+      const pt = p.fusion ? {x:t.x, y:t.y} : worldToLocal2D(t.x, t.y, panelSourceId(p));
+      const [sx,sy]=w2s(v,p,pt.x,pt.y);
+      ctx.strokeStyle='#c00'; ctx.lineWidth=2;
+      ctx.strokeRect(sx-t.w*v.zoom/2, sy-t.h*v.zoom/2, t.w*v.zoom, t.h*v.zoom);
+      ctx.fillStyle='#c00'; ctx.fillText('#'+t.id, sx+5, sy-5);
+    }
+  }
+}
+
+// ================= ZONE (dong bo vinh vien neu ve luc SYNC ON) =================
+// Toan bo pipeline nay dam bao zone luon duoc chuyen dung giua khung Local (rieng tung LiDAR)
+// va khung Fusion (the gioi chung), theo extrinsics thuc te - khong bi lech khi LiDAR co dx/dy/yaw != 0.
+const zoneDebugCache = new Map();
+let panelDebugSignature = '';
+function debugPanelMappings(){
+  const mapping=Array.from({length:lidarCount},(_,panelIndex)=>{
+    const sourceId=panelSourceId({idx:panelIndex,fusion:false}), f=getFrame(sourceId), e=pointCloudTransform2D(sourceId);
+    return {uiPanel:panelIndex, sourceId, configuredId:extrinsics[panelIndex]?.id,
+      frameSourceId:f?.sourceId, extrinsic:{dx:e.dx,dy:e.dy,thetaDeg:e.theta*180/PI}};
+  });
+  const signature=JSON.stringify(mapping);
+  if (panelDebugSignature!==signature){ panelDebugSignature=signature; console.log('LiDAR PANEL DEBUG',mapping); }
+}
+function debugZoneTransform(zone, sourceId){
+  if (sourceId !== 0) return;
+  const e=pointCloudTransform2D(sourceId);
+  let localCoordinates, transformedCoordinates;
+  if (zone.type===0){
+    localCoordinates=[[zone.x1,zone.y1],[zone.x2,zone.y1],[zone.x2,zone.y2],[zone.x1,zone.y2]];
+    transformedCoordinates=localCoordinates.map(([x,y])=>localToWorld2D(x,y,sourceId));
+  } else if (zone.type===1||zone.type===4){
+    localCoordinates=zone.vertices||[];
+    transformedCoordinates=localCoordinates.map(([x,y])=>localToWorld2D(x,y,sourceId));
+  } else if (zone.type===2){
+    localCoordinates={center:[zone.cx,zone.cy],radius:zone.radius};
+    transformedCoordinates={center:localToWorld2D(zone.cx,zone.cy,sourceId),radius:zone.radius};
+  } else {
+    localCoordinates={center:[zone.sx,zone.sy],radius:zone.sRadius,angles:[zone.sAngleStart,zone.sAngleEnd]};
+    transformedCoordinates={center:localToWorld2D(zone.sx,zone.sy,sourceId),radius:zone.sRadius,
+      angles:[zone.sAngleStart+e.theta*180/PI,zone.sAngleEnd+e.theta*180/PI]};
+  }
+  const trace={id:zone.id,sourceId,panel:zone.panel,li:zone.li,type:zone.type,localCoordinates,
+    extrinsic:{dx:e.dx,dy:e.dy,thetaRad:e.theta,thetaDeg:e.theta*180/PI},transformedCoordinates};
+  if (zone.type===0 && e.dx===0 && e.dy===0 && e.theta===0){
+    const identity=transformedCoordinates.every((p,i)=>p.x===localCoordinates[i][0]&&p.y===localCoordinates[i][1]);
+    console.assert(identity,'L1 identity transform failed',trace);
+  }
+  const signature=JSON.stringify(trace);
+  if (zoneDebugCache.get(zone.id)!==signature){ zoneDebugCache.set(zone.id,signature); console.log('ZONE DEBUG',trace); }
+}
+function zoneOriginalPoints(z){
+  if(z.type===0) return [[z.x1,z.y1],[z.x2,z.y1],[z.x2,z.y2],[z.x1,z.y2]];
+  if(z.type===1||z.type===4) return z.vertices||[];
+  if(z.type===2) return Array.from({length:64},(_,i)=>{const a=i*2*PI/64;return [z.cx+z.radius*Math.cos(a),z.cy+z.radius*Math.sin(a)];});
+  if(z.type===3){
+    const pts=[[z.sx,z.sy]], a1=z.sAngleStart*PI/180, a2=z.sAngleEnd*PI/180;
+    const span=((a2-a1+2*PI)%(2*PI))||2*PI;
+    for(let i=0;i<=48;i++){const a=a1+span*i/48;pts.push([z.sx+z.sRadius*Math.cos(a),z.sy+z.sRadius*Math.sin(a)]);} return pts;
+  }
+  return [];
+}
+function zonePointToWorld(z,[x,y]){ return z.scope==='fusion'?{x,y}:localToWorld2D(x,y,zoneSourceId(z)); }
+function worldPointToView(point,p){ return p.fusion?point:worldToLocal2D(point.x,point.y,panelSourceId(p)); }
+function shouldRenderZoneInView(z,p){
+  if(p.fusion) return true;
+  if(z.scope==='fusion') return true;
+  // sourceId 0 la hop le, khong test bang truthiness.
+  return zoneSourceId(z)===panelSourceId(p);
+}
+function canEditZoneInView(z,p){
+  if(z.scope==='fusion') return p.fusion;
+  return !p.fusion && zoneSourceId(z)===panelSourceId(p);
+}
+// Hinh hoc Zone (canonical) -> world -> view muc tieu. Khong tao ban sao Zone rieng cho tung view.
+function getZoneGeometryForView(z,p){
+  const original=zoneOriginalPoints(z);
+  if(p.fusion) return original.map(q=>zonePointToWorld(z,q));
+  if(z.scope==='local') return original.map(([x,y])=>({x,y})); // panel chu: da la local
+  return original.map(q=>worldPointToView(zonePointToWorld(z,q),p));
+}
+function zoneControlPoints(z){
+  if(z.type===0) return [[z.x1,z.y1],[z.x2,z.y2]];
+  if(z.type===1||z.type===4) return z.vertices||[];
+  if(z.type===2) return [[z.cx+z.radius,z.cy]];
+  if(z.type===3){const a1=z.sAngleStart*PI/180,a2=z.sAngleEnd*PI/180;return [[z.sx+Math.cos(a1)*z.sRadius,z.sy+Math.sin(a1)*z.sRadius],[z.sx+Math.cos(a2)*z.sRadius,z.sy+Math.sin(a2)*z.sRadius]];}
+  return [];
+}
+function zoneCanonicalPointToView(z,q,p){ return worldPointToView(zonePointToWorld(z,q),p); }
+function viewPointToCanonical(z,x,y,p){ const world=p.fusion?{x,y}:localToWorld2D(x,y,panelSourceId(p)); return z.scope==='fusion'?world:worldToLocal2D(world.x,world.y,zoneSourceId(z)); }
+function drawZones(p, v){
+  if (p.fusion) debugPanelMappings();
+  for (let i=0;i<zones.length;i++){
+    const z=zones[i]; if(!shouldRenderZoneInView(z,p)) continue;
+    if(p.fusion&&z.scope==='local') debugZoneTransform(z,zoneSourceId(z));
+    const points=getZoneGeometryForView(z,p); if(points.length<3) continue;
+    const sel=i===zoneSelected;
+    ctx.strokeStyle=sel?'#0066cc':'#cc0022'; ctx.fillStyle=sel?'rgba(0,102,204,0.10)':'rgba(204,0,34,0.07)'; ctx.lineWidth=sel?2:1.2;
+    ctx.beginPath(); points.forEach((q,k)=>{const [sx,sy]=w2s(v,p,q.x,q.y);k?ctx.lineTo(sx,sy):ctx.moveTo(sx,sy);});
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+    if(sel&&zoneEdit&&canEditZoneInView(z,p)) zoneControlPoints(z).forEach(q=>{const vq=zoneCanonicalPointToView(z,q,p),[sx,sy]=w2s(v,p,vq.x,vq.y);handle(sx,sy);});
+    ctx.fillStyle='#000'; ctx.font='10px Segoe UI'; ctx.fillText('Z'+z.id,p.x+8,p.y+24+i*12);
+  }
+}
+function handle(x,y){ ctx.fillStyle='#0066cc'; ctx.beginPath(); ctx.arc(x,y,5,0,2*PI); ctx.fill();
+  ctx.strokeStyle='#fff'; ctx.lineWidth=1; ctx.stroke(); }
+
+function drawZoneWIP(p, v){
+  if (!zoneMode || !zoneTool || p.idx !== wipPanel) return;
+  ctx.strokeStyle='#0a0'; ctx.setLineDash([5,4]); ctx.lineWidth=1.2;
+  const m = lastWorld, onThis = (curPanel && curPanel.idx === wipPanel);
+  if (zoneTool==='rect' && zoneVerts.length===1){
+    const [sx1,sy1]=w2s(v,p,zoneVerts[0][0],zoneVerts[0][1]);
+    const [sx2,sy2]= onThis ? w2s(v,p,m[0],m[1]) : [sx1,sy1];
+    ctx.strokeRect(Math.min(sx1,sx2),Math.min(sy1,sy2),Math.abs(sx2-sx1),Math.abs(sy2-sy1));
+  } else if (zoneTool==='polygon' && zoneVerts.length){
+    ctx.beginPath();
+    zoneVerts.forEach((vt,k)=>{ const [sx,sy]=w2s(v,p,vt[0],vt[1]); k?ctx.lineTo(sx,sy):ctx.moveTo(sx,sy); });
+    if (onThis){ const [mx,my]=w2s(v,p,m[0],m[1]); ctx.lineTo(mx,my); }
+    ctx.stroke();
+    zoneVerts.forEach(vt=>{ const [sx,sy]=w2s(v,p,vt[0],vt[1]); handle(sx,sy); });
+  } else if (zoneTool==='circle' && zoneVerts.length===1){
+    const [sx,sy]=w2s(v,p,zoneVerts[0][0],zoneVerts[0][1]);
+    const r=(onThis?Math.hypot(m[0]-zoneVerts[0][0], m[1]-zoneVerts[0][1]):0)*v.zoom;
+    ctx.beginPath(); ctx.arc(sx,sy,r,0,2*PI); ctx.stroke();
+  } else if (zoneTool==='sector' && zoneVerts.length>=1){
+    const [sx,sy]=w2s(v,p,zoneVerts[0][0],zoneVerts[0][1]);
+    if (zoneVerts.length===1){
+      const r=(onThis?Math.hypot(m[0]-zoneVerts[0][0], m[1]-zoneVerts[0][1]):0)*v.zoom;
+      ctx.beginPath(); ctx.arc(sx,sy,r,0,2*PI); ctx.stroke();
+    } else {
+      const r=Math.hypot(zoneVerts[1][0]-zoneVerts[0][0], zoneVerts[1][1]-zoneVerts[0][1])*v.zoom;
+      const a1=Math.atan2(zoneVerts[1][1]-zoneVerts[0][1], zoneVerts[1][0]-zoneVerts[0][0]);
+      const a2=onThis?Math.atan2(m[1]-zoneVerts[0][1], m[0]-zoneVerts[0][0]):a1;
+      ctx.beginPath(); ctx.moveTo(sx,sy); ctx.arc(sx,sy,r,-a1,-a2,true); ctx.closePath(); ctx.stroke();
+    }
+  } else if (zoneTool==='freehand' && isFreeDrawing && freehandPts.length>1){
+    ctx.beginPath();
+    freehandPts.forEach((vt,k)=>{ const [sx,sy]=w2s(v,p,vt[0],vt[1]); k?ctx.lineTo(sx,sy):ctx.moveTo(sx,sy); });
+    ctx.stroke();
+  }
+  ctx.setLineDash([]);
+}
+
+// ===== THUOC KE: rieng tung khung; chi dong bo neu ve luc SYNC ON =====
+function drawRuler(p, v){
+  const drawOne = (it)=>{
+    const pts = it.pts;
+    if (!pts || !pts.length) return;
+    ctx.fillStyle='#000'; ctx.strokeStyle='#000'; ctx.lineWidth=1;
+    pts.forEach(pt=>{ const [sx,sy]=w2s(v,p,pt[0],pt[1]);
+      ctx.beginPath(); ctx.arc(sx,sy,3.5,0,2*PI); ctx.fill(); });
+    if (pts.length===2){
+      const [sx1,sy1]=w2s(v,p,pts[0][0],pts[0][1]);
+      const [sx2,sy2]=w2s(v,p,pts[1][0],pts[1][1]);
+      ctx.beginPath(); ctx.moveTo(sx1,sy1); ctx.lineTo(sx2,sy2); ctx.stroke();
+      const d=Math.hypot(pts[1][0]-pts[0][0], pts[1][1]-pts[0][1]);
+      ctx.font='bold 12px Segoe UI'; ctx.fillText(d.toFixed(2)+' m', (sx1+sx2)/2+6, (sy1+sy2)/2-8);
+    }
+  };
+  for (const it of rulerItems)
+    if (it.panel === p.idx || it.sync) drawOne(it);
+}
+
+function drawHeader(p, v){
+  const f = getFrame(p.fusion?0:p.idx);
+  ctx.fillStyle='#000'; ctx.font='11px Segoe UI';
+  let pts = 0;
+  if (p.fusion){ for (let i=0;i<lidarCount;i++){ const q=getFrame(i); if (q) pts+=q.n; } }
+  else if (f) pts = f.n;
+  ctx.fillText((p.fusion?'FUSION':(lidarNames[p.idx]||('LiDAR '+(p.idx+1))))+' | Zoom: '+v.zoom.toFixed(1)+
+    ' | Points: '+pts+' | Frame: '+(f?f.frameId:'--')+(paused?' [offset -'+viewOffset+']':''),
+    p.x+6, p.y+14);
+  if (f && !p.fusion){
+    ctx.fillStyle='#555'; ctx.font='10px Consolas';
+    ctx.fillText('API: range['+f.rMin.toFixed(2)+','+f.rMax.toFixed(1)+']m | ang['+
+      (f.aMin*180/PI).toFixed(1)+','+(f.aMax*180/PI).toFixed(1)+']deg | scan='+f.scan.toFixed(3)+
+      's | wave='+f.wave+' | pts='+f.n+' | ts='+f.tsSec+'.'+String(f.tsUsec).padStart(6,'0'),
+      p.x+6, p.y+p.h-6);
+  }
+}
+
+// ================= CHUOT =================
+let lastWorld=[0,0], mouseSX=0, mouseSY=0, isDrag=false, lastMX=0, lastMY=0, curPanel=null;
+function panelAt(sx, sy){ for (const p of getPanels()) if (sx>=p.x && sx<p.x+p.w && sy>=p.y && sy<p.y+p.h) return p; return null; }
+
+canvas.addEventListener('mousemove', e=>{
+  const r = canvas.getBoundingClientRect();
+  mouseSX = e.clientX-r.left; mouseSY = e.clientY-r.top;
+  curPanel = panelAt(mouseSX, mouseSY);
+  if (curPanel){ const v = views[curPanel.idx]; lastWorld = s2w(v, curPanel, mouseSX, mouseSY); }
+  if (isFreeDrawing && zoneTool==='freehand') freehandPts.push([lastWorld[0], lastWorld[1]]);
+
+  if (zoneEdit && zoneDragging && zoneDragIdx>=0 && zoneSelected>=0 && curPanel && canEditZoneInView(zones[zoneSelected],curPanel)){
+    const z = zones[zoneSelected], q=viewPointToCanonical(z,lastWorld[0],lastWorld[1],curPanel), wx=q.x, wy=q.y;
+    if (z.type===0){ if (zoneDragIdx===0){z.x1=wx;z.y1=wy;} else {z.x2=wx;z.y2=wy;} }
+    else if (z.type===1||z.type===4){ z.vertices[zoneDragIdx]=[wx,wy]; }
+    else if (z.type===2){ z.radius=Math.hypot(wx-z.cx, wy-z.cy); }
+    else if (z.type===3){
+      if (zoneDragIdx===0) z.sAngleStart=Math.atan2(wy-z.sy, wx-z.sx)*180/PI;
+      else z.sAngleEnd=Math.atan2(wy-z.sy, wx-z.sx)*180/PI;
+    }
+  } else if (isDrag && curPanel){
+    const v = views[curPanel.idx];
+    const dx=(e.clientX-lastMX)/v.zoom, dy=(e.clientY-lastMY)/v.zoom;
+    if (syncMode){ views.forEach(vv=>{vv.panX-=dx; vv.panY+=dy;}); }
+    else { v.panX-=dx; v.panY+=dy; }
+  }
+  lastMX=e.clientX; lastMY=e.clientY;
+});
+
+canvas.addEventListener('mousedown', e=>{
+  if (e.button!==0 || !curPanel) return;
+  if (zoneMode){
+    wipPanel = curPanel.idx;
+    if (zoneTool){ zoneClick(lastWorld[0], lastWorld[1]); return; }
+    if (zoneEdit){
+      const hit = hitVertex(lastWorld[0], lastWorld[1]);
+      if (hit){ zoneDragging=true; zoneDragIdx=hit.i; zoneSelected=hit.z; updateZoneList(); return; }
+      const zi = hitZone(lastWorld[0], lastWorld[1]);
+      if (zi>=0){ zoneSelected=zi; updateZoneList(); return; }
+    }
+    isDrag = true;   // khong chon hinh -> chuot thuong
+    return;
+  }
+  if (rulerMode){
+    const pi = curPanel.idx;
+    let it = rulerActive[pi];
+    if (!it || it.pts.length >= 2){
+      it = { panel: pi, pts: [], sync: syncMode };
+      rulerItems.push(it); rulerActive[pi] = it;
+    }
+    it.pts.push([lastWorld[0], lastWorld[1]]);
+    return;
+  }
+  if (pickMode){
+    if (curPanel.idx===0 && pickRef.length<2) pickRef.push([lastWorld[0],lastWorld[1]]);
+    else if (curPanel.idx===selLidar && selLidar!==0 && pickTarget.length<2) pickTarget.push([lastWorld[0],lastWorld[1]]);
+    document.getElementById('btnPick').textContent='Pick R:'+pickRef.length+' T:'+pickTarget.length;
+    if (pickRef.length===2 && pickTarget.length===2){
+      send({cmd:'pick_apply', ref:pickRef.map(q=>({x:q[0],y:q[1]})), target:pickTarget.map(q=>({x:q[0],y:q[1]}))});
+      pickRef=[]; pickTarget=[];
+      setTimeout(()=>document.getElementById('btnPick').textContent='Pick R:0 T:0', 1500);
+    }
+    return;
+  }
+  isDrag = true;
+});
+window.addEventListener('mouseup', e=>{
+  if (e.button!==0) return;
+  isDrag=false;
+  if (isFreeDrawing && zoneTool==='freehand'){
+    isFreeDrawing=false;
+    if (freehandPts.length>=3){
+      const step=Math.max(1, Math.floor(freehandPts.length/40));
+      const verts=[]; for (let i=0;i<freehandPts.length;i+=step) verts.push(freehandPts[i]);
+      if (verts.length>=3) addZone({type:4, vertices:verts});
+    }
+    freehandPts=[];
+  }
+  if (zoneDragging){ zoneDragging=false; zoneDragIdx=-1; sendZones(); }
+});
+// zoom giu tam
+canvas.addEventListener('wheel', e=>{
+  e.preventDefault();
+  if (!curPanel) return;
+  const f = e.deltaY<0 ? 1.15 : 1/1.15;
+  const cl = z => Math.min(200, Math.max(0.5, z*f));
+  if (syncMode) views.forEach(vv=>{ vv.zoom = cl(vv.zoom); });
+  else views[curPanel.idx].zoom = cl(views[curPanel.idx].zoom);
+},{passive:false});
+canvas.addEventListener('contextmenu', e=>{
+  e.preventDefault();
+  if (!zoneMode) return;
+  if (zoneTool==='polygon' && zoneVerts.length>=3){ finishPolygon(); return; }
+  const zi = hitZone(lastWorld[0], lastWorld[1]);
+  if (zi >= 0) deleteZone(zi);
+  else { zoneSelected = -1; updateZoneList(); }
+});
+
+// ================= ZONE LOGIC =================
+function zoneClick(wx, wy){
+  if (zoneTool==='rect'){
+    zoneVerts.push([wx,wy]);
+    if (zoneVerts.length===2){
+      const B=0.30;
+      addZone({type:0, x1:Math.min(zoneVerts[0][0],zoneVerts[1][0])-B, y1:Math.min(zoneVerts[0][1],zoneVerts[1][1])-B,
+               x2:Math.max(zoneVerts[0][0],zoneVerts[1][0])+B, y2:Math.max(zoneVerts[0][1],zoneVerts[1][1])+B});
+      zoneVerts=[];
+    }
+  } else if (zoneTool==='polygon') zoneVerts.push([wx,wy]);
+  else if (zoneTool==='circle'){
+    zoneVerts.push([wx,wy]);
+    if (zoneVerts.length===2){
+      addZone({type:2, cx:zoneVerts[0][0], cy:zoneVerts[0][1],
+               radius:Math.hypot(zoneVerts[1][0]-zoneVerts[0][0], zoneVerts[1][1]-zoneVerts[0][1])+0.30});
+      zoneVerts=[];
+    }
+  } else if (zoneTool==='sector'){
+    zoneVerts.push([wx,wy]);
+    if (zoneVerts.length===3){
+      const a1=Math.atan2(zoneVerts[1][1]-zoneVerts[0][1], zoneVerts[1][0]-zoneVerts[0][0])*180/PI;
+      const a2=Math.atan2(zoneVerts[2][1]-zoneVerts[0][1], zoneVerts[2][0]-zoneVerts[0][0])*180/PI;
+      addZone({type:3, sx:zoneVerts[0][0], sy:zoneVerts[0][1],
+               sRadius:Math.hypot(zoneVerts[1][0]-zoneVerts[0][0], zoneVerts[1][1]-zoneVerts[0][1])+0.30,
+               sAngleStart:a1, sAngleEnd:a2});
+      zoneVerts=[];
+    }
+  } else if (zoneTool==='freehand'){ isFreeDrawing=true; freehandPts=[[wx,wy]]; }
+}
+function finishPolygon(){ if (zoneVerts.length>=3){ addZone({type:1, vertices:zoneVerts.slice()}); zoneVerts=[]; } }
+function addZone(z){
+  z.id=zoneNextId++; window.zoneNextId=zoneNextId; z.scope=document.getElementById('zoneScope').value;
+  const drawnOnFusion=wipPanel===lidarCount;
+  const drawingSource=drawnOnFusion?selectedSourceId():panelSourceId({idx:wipPanel,fusion:false});
+  const transformZone=(point,angleDelta=0)=>{
+    if(z.type===0){z.vertices=[[z.x1,z.y1],[z.x2,z.y1],[z.x2,z.y2],[z.x1,z.y2]].map(q=>{const p=point(q[0],q[1]);return [p.x,p.y];});delete z.x1;delete z.y1;delete z.x2;delete z.y2;z.type=1;}
+    else if(z.type===1||z.type===4) z.vertices=z.vertices.map(q=>{const p=point(q[0],q[1]);return [p.x,p.y];});
+    else if(z.type===2){const p=point(z.cx,z.cy);z.cx=p.x;z.cy=p.y;}
+    else if(z.type===3){const p=point(z.sx,z.sy);z.sx=p.x;z.sy=p.y;z.sAngleStart+=angleDelta;z.sAngleEnd+=angleDelta;}
+  };
+  if(z.scope==='fusion'){
+    z.sourceId=null; z.li=null;
+    if(!drawnOnFusion){const yaw=pointCloudTransform2D(drawingSource).theta*180/PI;transformZone((x,y)=>localToWorld2D(x,y,drawingSource),yaw);}
+  } else {
+    // Toa do zone luu theo khung local cua LiDAR nguon.
+    z.sourceId=drawingSource; z.li=drawingSource;
+    if(drawnOnFusion){const yaw=pointCloudTransform2D(drawingSource).theta*180/PI;transformZone((x,y)=>worldToLocal2D(x,y,drawingSource),-yaw);}
+  }
+  z.panel = (curPanel ? curPanel.idx : selLidar);
+  z.sync = syncMode;
+  zones.push(z); sendZones(); updateZoneList();
+  addLog('[ZONE] Them zone Z'+z.id+' ('+['Rect','Polygon','Circle','Sector','Freehand'][z.type]+') tai khung '+
+    (z.panel===lidarCount?'FUSION':'L'+(z.panel+1))+(z.sync?' [sync vinh vien]':''));
+}
+function deleteZone(i){
+  if (i<0 || i>=zones.length) return;
+  const z = zones[i];
+  zones.splice(i,1);
+  if (zoneSelected===i) zoneSelected=-1; else if (zoneSelected>i) zoneSelected--;
+  sendZones(); updateZoneList();
+  addLog('[ZONE] Da xoa rieng le zone Z'+z.id);
+}
+function sendZones(){
+  const arr = zones.map(z=>{
+    const o={scope:z.scope||'fusion', id:z.id, sourceId:z.scope==='local'?zoneSourceId(z):null, type:z.type};
+    if (z.type===0){o.x1=z.x1;o.y1=z.y1;o.x2=z.x2;o.y2=z.y2;}
+    else if (z.type===1||z.type===4) o.vertices=z.vertices;
+    else if (z.type===2){o.cx=z.cx;o.cy=z.cy;o.radius=z.radius;}
+    else {o.sx=z.sx;o.sy=z.sy;o.sRadius=z.sRadius;o.sAngleStart=z.sAngleStart;o.sAngleEnd=z.sAngleEnd;}
+    return o;
+  });
+  send({cmd:'zones_set', zones:arr});
+  viewer3d?.setZones(zones,extrinsics);
+}
+function hitZone(wx,wy){
+  for (let i=zones.length-1;i>=0;i--){
+    const z=zones[i]; if(!curPanel||!shouldRenderZoneInView(z,curPanel)) continue;
+    const q=viewPointToCanonical(z,wx,wy,curPanel);
+    if (zin(z,q.x,q.y)) return i;
+  }
+  return -1;
+}
+function zin(z,px,py){
+  if (z.type===0) return px>=z.x1&&px<=z.x2&&py>=z.y1&&py<=z.y2;
+  if (z.type===1||z.type===4){
+    if (!z.vertices||z.vertices.length<3) return false;
+    let ins=false;
+    for (let i=0,j=z.vertices.length-1;i<z.vertices.length;j=i++){
+      const xi=z.vertices[i][0],yi=z.vertices[i][1],xj=z.vertices[j][0],yj=z.vertices[j][1];
+      if (((yi>py)!==(yj>py)) && (px < (xj-xi)*(py-yi)/(yj-yi)+xi)) ins=!ins;
+    }
+    return ins;
+  }
+  if (z.type===2) return Math.hypot(px-z.cx,py-z.cy)<=z.radius;
+  if (z.type===3){
+    const d=Math.hypot(px-z.sx,py-z.sy); if (d>z.sRadius) return false;
+    const a=Math.atan2(py-z.sy,px-z.sx)*180/PI;
+    return z.sAngleStart<=z.sAngleEnd ? (a>=z.sAngleStart&&a<=z.sAngleEnd) : (a>=z.sAngleStart||a<=z.sAngleEnd);
+  }
+  return false;
+}
+function hitVertex(wx,wy){
+  if (zoneSelected<0||zoneSelected>=zones.length) return null;
+  const z=zones[zoneSelected],th=0.6;if(!curPanel||!canEditZoneInView(z,curPanel))return null;const q=viewPointToCanonical(z,wx,wy,curPanel),pts=zoneControlPoints(z);
+  for(let i=0;i<pts.length;i++)if(Math.hypot(q.x-pts[i][0],q.y-pts[i][1])<th)return {z:zoneSelected,i};
+  return null;
+}
+function updateZoneList(){
+  const c=document.getElementById('zoneListItems'); c.innerHTML='';
+  const names=['Rect','Polygon','Circle','Sector','Freehand'];
+  zones.forEach((z,i)=>{
+    const d=document.createElement('div');
+    d.className='zi'+(i===zoneSelected?' sel':'');
+    const t=document.createElement('span');
+    const owner=z.scope==='fusion'?'World':'L'+(zoneSourceId(z)+1);
+    t.textContent='Z'+z.id+' ['+owner+' '+names[z.type]+'] '+(z.scope||'fusion')+(z.sync?' (sync)':'');
+    t.onclick=()=>{ zoneSelected=i; updateZoneList(); };
+    const x=document.createElement('button');
+    x.textContent='✕'; x.title='Xóa zone này';
+    x.onclick=(ev)=>{ ev.stopPropagation(); deleteZone(i); };
+    d.appendChild(x); d.appendChild(t);
+    c.appendChild(d);
+  });
+}
+
+// ================= IP CONFIG + WEB HANG + PING =================
+function updateIpTable(lidars){
+  const tb=document.getElementById('ipTableBody'); tb.innerHTML='';
+  ipTableOrig = {};
+  lidars.forEach((L,i)=>{
+    ipTableOrig[i] = { name: L.name||'', ip: L.ip||'', port: L.port||1112 };
+    const tr=document.createElement('tr');
+    tr.innerHTML='<td>'+(i+1)+'</td>'+
+      '<td><input type="text" id="name_'+i+'" value="'+(L.name||'')+'"></td>'+
+      '<td><input type="text" id="ip_'+i+'" value="'+(L.ip||'')+'"></td>'+
+      '<td><input type="number" class="port" id="port_'+i+'" value="'+(L.port||1112)+'"></td>'+
+      '<td style="color:'+(L.connected?'#0a0':'#c00')+'">'+(L.connected?'● Connected':'○ Disconnected')+'</td>'+
+      '<td><button onclick="applyIp('+i+')">✔ Áp dụng</button></td>'+
+      '<td><button onclick="openDeviceWeb('+i+')" title="Mở trang cấu hình thiết bị">🌐 Mở</button></td>'+
+      '<td><button onclick="doPing('+i+')" title="Đo thời gian phản hồi 1 gói tin">📶</button> <span id="ping_'+i+'" style="color:#06c">--</span></td>'+
+      '<td>'+(lidars.length>1?'<button onclick="removeLidar('+i+')">✕</button>':'—')+'</td>';
+    tb.appendChild(tr);
+  });
+}
+window.applyIp = function(id){
+  const name=document.getElementById('name_'+id).value.trim();
+  const ip=document.getElementById('ip_'+id).value.trim();
+  const port=parseInt(document.getElementById('port_'+id).value)||1112;
+  if (!name){ alert('Tên không được để trống!'); return; }
+  if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(ip)){ alert('IP không hợp lệ!'); return; }
+  const o = ipTableOrig[id] || {};
+  if (name !== o.name) send({cmd:'lidar_rename', id, name});
+  if (ip !== o.ip || port !== o.port) send({cmd:'lidar_set_ip', id, ip, port});
+  addLog('[IP] Áp dụng LiDAR '+(id+1)+': tên="'+name+'" | '+ip+':'+port);
+};
+window.removeLidar = function(id){ if (confirm('Xóa LiDAR '+(id+1)+'?')) send({cmd:'lidar_remove', id}); };
+window.openDeviceWeb = function(id){
+  const el = document.getElementById('ip_'+id);
+  const ip = (el && el.value.trim()) || (ipTableOrig[id] ? ipTableOrig[id].ip : '');
+  if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(ip)){ alert('IP không hợp lệ!'); return; }
+  window.open('http://'+ip+'/', '_blank');
+  addLog('[CFG] Mo trang cau hinh thiet bi http://'+ip+'/ (dang nhap: browser / 123456)');
+};
+window.doPing = function(id){ send({cmd:'ping', id:id}); };
+
+// ================= NUT TOOLBAR =================
+window.send = function(o) {
+    if (ws && connected) ws.send(JSON.stringify(o));
+};
+
+const inpDx=document.getElementById('inpDx'), inpDy=document.getElementById('inpDy'), inpTh=document.getElementById('inpTh');
+document.getElementById('btnConnect').onclick = connectWS;
+document.getElementById('btnApplyExtr').onclick = () => send({cmd:'extr_apply', id:selLidar, dx:+inpDx.value||0, dy:+inpDy.value||0, thetaDeg:+inpTh.value||0, z:+document.getElementById('inpZ').value||0, roll:+document.getElementById('inpRoll').value||0, pitch:+document.getElementById('inpPitch').value||0});
+document.getElementById('btnSaveCfg').onclick = () => send({cmd:'extr_save'});
+document.getElementById('btnPrintExtr').onclick = () => send({cmd:'extr_print'});
+
+let latencySleep = false;
+function sendLatency(){
+  latencySleep = !latencySleep;
+  send({cmd:'latency', sleep: latencySleep});
+  addLog('[DO TRE] T/Latency: gui lenh ' + (latencySleep ? 'NGU (sleep)' : 'THUC (wake)'));
+}
+document.getElementById('btnLatency').onclick = () => sendLatency();
+
+document.getElementById('btnShot').onclick = shot;
+document.getElementById('btnFusion').onclick = function(){ showFusion=!showFusion;
+  this.textContent = showFusion?'HIDE FUSION':'SHOW FUSION';
+  this.classList.toggle('active',showFusion); resize(); };
+document.getElementById('btnSync').onclick = function(){ syncMode=!syncMode; this.textContent='SYNC: '+(syncMode?'ON':'OFF'); this.classList.toggle('active',syncMode);
+  addLog('[SYNC] '+(syncMode?'ON - zone/thước vẽ từ bây giờ sẽ đồng bộ vĩnh viễn':'OFF - zone/thước mới chỉ nằm ở khung đang vẽ')); };
+document.getElementById('btnGrid').onclick = function(){ gridPolar=!gridPolar; this.classList.toggle('active',gridPolar); };
+document.getElementById('btnRays').onclick = function(){ rayMode=!rayMode; this.classList.toggle('active',rayMode); };
+document.getElementById('btnIntensity').onclick = function(){ intensityMode=!intensityMode; this.classList.toggle('active',intensityMode); };
+document.getElementById('btnAccum').onclick = function(){ accumulateMode=!accumulateMode; this.classList.toggle('active',accumulateMode); accCv={}; };
+document.getElementById('btnRuler').onclick = function(){ rulerMode=!rulerMode; window.rulerMode=rulerMode; setZoneOff(); this.classList.toggle('active',rulerMode);
+  rulerItems=[]; rulerActive={}; };
+document.getElementById('btnZone').onclick = function(){ zoneMode=!zoneMode; window.zoneMode=zoneMode; rulerMode=false; pickMode=false;
+  document.getElementById('btnRuler').classList.remove('active'); document.getElementById('btnPick').classList.remove('active');
+  this.classList.toggle('active',zoneMode);
+  document.getElementById('zoneToolbar').classList.toggle('show',zoneMode);
+  document.getElementById('zoneList').classList.toggle('show',zoneMode);
+  if (!zoneMode){ zoneVerts=[]; zoneEdit=false; wipPanel=-1; }
+  else setZoneToolUI(null);
+  resize(); };
+document.getElementById('btnClearZone').onclick = () => { zones=[]; window.zones=zones; zoneVerts=[]; zoneSelected=-1; send({cmd:'zone_clear'}); viewer3d?.setZones(zones,extrinsics); updateZoneList(); };
+document.getElementById('btnCluster').onclick = () => send({cmd:'cluster'});
+document.getElementById('btnPick').onclick = function(){ pickMode=!pickMode; window.pickMode=pickMode; setZoneOff(); rulerMode=false;
+  document.getElementById('btnRuler').classList.remove('active');
+  this.classList.toggle('active',pickMode); pickRef=[]; pickTarget=[]; this.textContent='Pick R:0 T:0'; };
+document.getElementById('btnIcp').onclick = () => send({cmd:'icp'});
+document.getElementById('btnRmse').onclick = () => { const v=+document.getElementById('inpTrue').value||0; if (v>0) send({cmd:'rmse_start','true':v}); };
+document.getElementById('btnRec').onclick = () => send({cmd:'record'});
+document.getElementById('btnPause').onclick = () => { paused=!paused; send({cmd:'pause',paused}); };
+document.getElementById('btnLog').onclick = () => document.getElementById('logPanel').classList.toggle('show');
+document.getElementById('btnElev').onclick = function(){ showElevation=!showElevation; this.classList.toggle('active',showElevation);
+  addLog('[DO CAO] '+(showElevation?'HIEN':'AN')+' thanh do cao LiDAR'); };
+document.getElementById('btnIpConfig').onclick = () => { document.getElementById('ipConfigPanel').classList.add('show');
+  document.getElementById('overlay').classList.add('show'); send({cmd:'lidar_get_config'}); };
+document.getElementById('btnCloseIpCfg').onclick = closeIp; document.getElementById('overlay').onclick = closeIp;
+function closeIp(){ document.getElementById('ipConfigPanel').classList.remove('show'); document.getElementById('overlay').classList.remove('show'); }
+document.getElementById('btnAddLidar').onclick = () => {
+  const name = prompt('Tên LiDAR mới:', 'LiDAR_'+(lidarCount+1)); if (!name) return;
+  const ip = prompt('Nhập IP LiDAR mới:', '192.168.201.19'); if (!ip) return;
+  const port = parseInt(prompt('Port:', '1112'))||1112;
+  send({cmd:'lidar_add', name, ip, port});
+  addLog('[IP] Thêm LiDAR "'+name+'" '+ip+':'+port);
+};
+function setZoneOff(){ if (zoneMode){ zoneMode=false; window.zoneMode=false; document.getElementById('btnZone').classList.remove('active');
+  document.getElementById('zoneToolbar').classList.remove('show'); document.getElementById('zoneList').classList.remove('show'); wipPanel=-1; setZoneToolUI(null); resize(); } }
+function shot(){ const a=document.createElement('a'); a.download='lidar_'+Date.now()+'.png'; a.href=canvas.toDataURL(); a.click(); }
+
+// >>> nut hinh = TOGGLE <<<
+function setZoneToolUI(tool){
+  zoneTool = tool; window.zoneTool=tool; zoneVerts=[]; freehandPts=[]; isFreeDrawing=false;
+  ['ztRect','ztPoly','ztCircle','ztSector','ztFree'].forEach(x=>document.getElementById(x).classList.remove('active'));
+  if (tool){
+    const map={rect:'ztRect',polygon:'ztPoly',circle:'ztCircle',sector:'ztSector',freehand:'ztFree'};
+    document.getElementById(map[tool]).classList.add('active');
+  }
+}
+[['ztRect','rect'],['ztPoly','polygon'],['ztCircle','circle'],['ztSector','sector'],['ztFree','freehand']]
+.forEach(([id,tool])=>{ document.getElementById(id).onclick=function(){
+  setZoneToolUI(zoneTool===tool ? null : tool);
+};});
+document.getElementById('ztEdit').onclick = function(){ zoneEdit=!zoneEdit; this.classList.toggle('active',zoneEdit); };
+document.getElementById('ztDel').onclick = () => deleteZone(zoneSelected);
+document.getElementById('ztDone').onclick = () => { if (zoneTool==='polygon'&&zoneVerts.length>=3) finishPolygon(); setZoneOff(); zoneEdit=false; document.getElementById('ztEdit').classList.remove('active'); };
+
+// ================= PHIM TAT =================
+document.addEventListener('keydown', e=>{
+  if(/INPUT|TEXTAREA|SELECT/.test(e.target.tagName))return;
+  if (e.target.tagName==='INPUT') return;
+  const k=e.key.toLowerCase();
+  if (k===' '||k==='p'){ e.preventDefault(); paused=!paused; send({cmd:'pause',paused}); }
+  else if (k==='arrowleft' && paused){ viewOffset=Math.min(499,viewOffset+1); }
+  else if (k==='arrowright' && paused){ viewOffset=Math.max(0,viewOffset-1); }
+  else if (k>='1'&&k<='9'){ const i=+k-1; if (i<lidarCount){ selLidar=i; window.selLidar=selLidar; buildSel(); send({cmd:'select',id:i}); } }
+  else if (k==='q') send({cmd:'extr_adjust',ddx:0.1,ddy:0,dth:0});
+  else if (k==='a') send({cmd:'extr_adjust',ddx:-0.1,ddy:0,dth:0});
+  else if (k==='e') send({cmd:'extr_adjust',ddx:0,ddy:0.1,dth:0});
+  else if (k==='d') send({cmd:'extr_adjust',ddx:0,ddy:-0.1,dth:0});
+  else if (k==='z') send({cmd:'extr_adjust',ddx:0,ddy:0,dth:1});
+  else if (k==='c') send({cmd:'extr_adjust',ddx:0,ddy:0,dth:-1});
+  else if (k==='f') send({cmd:'extr_print'});
+  else if (k==='v') send({cmd:'extr_save'});
+  else if (k==='s') send({cmd:'record'});
+  else if (k==='g') document.getElementById('btnGrid').click();
+  else if (k==='m') document.getElementById('btnRays').click();
+  else if (k==='r') views.forEach(v=>{v.zoom=8;v.panX=0;v.panY=0;});
+  else if (k==='t') sendLatency();
+  else if (k==='u') document.getElementById('btnAccum').click();
+  else if (k==='n') document.getElementById('btnIntensity').click();
+  else if (k==='l') document.getElementById('btnRuler').click();
+  else if (k==='y') document.getElementById('btnZone').click();
+  else if (k==='0') document.getElementById('btnClearZone').click();
+  else if (k==='delete') deleteZone(zoneSelected);
+  else if (k==='j') send({cmd:'cluster'});
+  else if (k==='k') document.getElementById('btnPick').click();
+  else if (k==='i') send({cmd:'icp'});
+  else if (k==='w') shot();
+  else if (k==='b') document.getElementById('btnFusion').click();
+  else if (k==='h') document.getElementById('btnElev').click();
+  else if (k==='enter' && zoneMode && zoneTool==='polygon' && zoneVerts.length>=3) finishPolygon();
+  else if (k==='escape'){ setZoneOff(); zoneEdit=false; document.getElementById('ztEdit').classList.remove('active'); rulerMode=false; window.rulerMode=false; pickMode=false; window.pickMode=false;
+    document.getElementById('btnRuler').classList.remove('active'); document.getElementById('btnPick').classList.remove('active'); zoneVerts=[]; }
+});
+
+resize(); buildSel(); connectWS(); requestAnimationFrame(render);
+addLog('=== LiDAR Master Viewer (ban hop nhat: zone da hinh + transform local/world + IP Config + Ping + nguong sai so + do cao) ===');
+document.getElementById('btn3d').onclick=()=>{
+  if(!viewer3d){
+    if(!window.Lidar3D){addLog('[3D] Module chưa tải. Mở bằng HTTP server và kiểm tra file vendor local.');return;}
+    try{viewer3d=new window.Lidar3D(document.getElementById('view3d'),document.getElementById('layers3d'),COLORS);viewer3d.fusion=pendingFusion;viewer3d.setZones(zones,extrinsics);}
+    catch(e){addLog('[3D] Không khởi tạo WebGL: '+e.message);return;}
+  }
+  show3d=!show3d;viewer3d.enabled=show3d;
+  document.getElementById('view3d').style.display=show3d?'block':'none';canvas.style.display=show3d?'none':'block';
+  document.getElementById('btn3d').classList.toggle('active',show3d);resize();viewer3d.resize();
+};
+document.querySelectorAll('[data-camera]').forEach(b=>b.onclick=()=>viewer3d?.preset(b.dataset.camera));
+document.getElementById('scanPlanes').onchange=e=>{if(viewer3d)viewer3d.showPlanes=e.target.checked;};
+document.getElementById('pointSize3d').oninput=e=>{if(viewer3d)viewer3d.pointSize=Math.max(1,Math.min(20,+e.target.value||3));};
+document.getElementById('decimation3d').oninput=e=>{if(viewer3d)viewer3d.decimation=Math.max(1,Math.min(100,Math.floor(+e.target.value)||1));};
+document.getElementById('fusionDelta').oninput=e=>{(viewer3d?viewer3d.fusion:pendingFusion).maxFusionDeltaMs=Math.max(0,Math.min(10000,+e.target.value||0));};
+for(const id of ['inpZ','inpRoll','inpPitch'])document.getElementById(id).onchange=()=>document.getElementById('btnApplyExtr').click();
+window.addEventListener('beforeunload',()=>viewer3d?.dispose());
+</script>
+</body>
+</html>
