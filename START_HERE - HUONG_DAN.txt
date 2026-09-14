@@ -1,0 +1,61 @@
+=========================================================
+LIDAR WEB VIEWER - START HERE (DOC TRUOC TIEN)
+=========================================================
+A. CAI DAT MOT LAN
+1) Visual C++ Redistributable x64 (bat buoc de chay backend):
+double-click tools\vc_redist.x64.exe trong bo nay.
+2) Python 3 (chi can neu mo web bang localhost:8080 nhieu may):
+cai tu python.org/Microsoft Store, tich "Add python to PATH".
+(Xem tren chinh may nay thi double-click frontend\index.html la du.)
+3) Visual Studio 2022 + workload "Desktop development with C++":
+CHI can neu muon sua code / doi IP LiDAR va build lai
+(cach build xem README.md muc 4).
+B. CHAY (MOI LAN)
+1) Double-click start_all.bat  -> 2 cua so den + Chrome tu mo.
+2) Web hien "Online" + diem LiDAR = OK. Dong he thong: dong 2 cua so den.
+C. MANG CHO LiDAR (QUAN TRONG)
+- LiDAR mac dinh 192.168.201.15, cong 1112. PC phai dat IP cung lop,
+vd 192.168.201.100 / 255.255.255.0 (Network & internet -> Ethernet -> Edit IP).
+- 4 LiDAR phai co 4 IP khac nhau .15/.16/.17/.18; doi IP tren trang web
+cua thiet bi: http://192.168.201.15  (user: browser / pass: 123456).
+- Neu he thong cua ban dung dai IP khac: sua mang IPS[4] trong ham main()
+cua backend\LidarWebGateway\lidar_web_gateway_v2.cpp roi build lai.
+
+C1. DOI IP LiDAR (QUAN TRONG)
+- Buoc 1: Mo trinh duyet -> http://192.168.201.15 (IP cu)
+  Dang nhap: browser / 123456
+  Vao tab Network -> doi IP moi (vd: 192.168.201.99) -> Save -> Parameters Take Effect
+- Buoc 2: Mo web viewer cua ban -> bam nut "IP Config" (mau do)
+  Tim dong LiDAR do -> sua IP thanh IP moi -> bam nut "Apply" (dau tich)
+  -> Backend tu reconnect + luu vao lidar_config.cfg
+- Luu y: NEU chi doi IP tren web hang ma KHONG cap nhat trong web viewer
+  -> LiDAR se hien "Disconnected" (vi backend van ket noi IP cu)
+
+C2. TEST DOI IP 1 CON
+- Chon IP cung subnet: 192.168.201.99, .100, .200... (de nhat)
+- Sau khi doi IP tren web hang, ping thu: ping 192.168.201.99
+  -> Thay "Reply from..." = OK
+- Cap nhat IP trong web viewer -> bam Apply -> cho 3-5 giay
+- Kiem tra: trang thai chuyen sang "Connected" (mau xanh) + point cloud hien ra
+
+C3. DUNG SWITCH/ROUTER CHO NHIEU LiDAR
+- Khuyen nghi: Dung switch thong thuong (5-8 ports, ~200k VND)
+  -> Tat ca thiet bi cung subnet, khong can cau hinh gi
+- Neu dung router: TAT DHCP server de tranh router cap IP khac lop mang
+- TUYET DOI KHONG dung router co NAT (PC va LiDAR khac lop mang)
+  -> Se khong ket noi duoc
+
+D. CALIBRATION
+- extrinsics.cfg (nam thu muc exe) chua bo ngoai tham hien tai, tu nap khi chay.
+- Neu lap lai vi tri/khung gian moi: hieu chinh bang o dx/dy/theta + phim
+Q/A E/D Z/C, hoac Pick (K) + ICP (I), roi SaveCfg (V). Chi tiet README muc 10.
+E. XEM TU MAY KHAC TRONG MANG LAN
+- Tren may chay backend, mo PowerShell (Admin) chay 2 lenh:
+New-NetFirewallRule -DisplayName "LiDAR Web (8080)" -Direction Inbound -Protocol TCP -LocalPort 8080 -Action Allow
+New-NetFirewallRule -DisplayName "LiDAR WS (9001)" -Direction Inbound -Protocol TCP -LocalPort 9001 -Action Allow
+- May khac mo: http://<IP-may-backend>:8080
+F. TAI LIEU
+- README.md        : huong dan day du (build, protocol, phim, loi thuong gap)
+- docs\            : SDK manual, LadarSet manual, TR60/TR70 manual
+- BaoCao_TongHop   : bao cao qua trinh thuc hien
+=========================================================
