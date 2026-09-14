@@ -5,7 +5,7 @@ export class Lidar3D {
   constructor(host, panel, palette) {
     this.host = host;
     this.panel = panel;
-    this.palette = palette;
+    this.palette = palette || ['#1f77b4','#e37702','#2ca02c','#9467bd'];
     this.layers = new Map();
     this.enabled = false;
     this.fusion = new LidarProtocol.FusionFrames();
@@ -13,8 +13,9 @@ export class Lidar3D {
     this.decimation = 1;
     this.showPlanes = true;
 
-    // Quản lý Zone từ Code 1
+    // Quan ly Zone
     this.zones = [];
+    this.extrinsics = [];
     this.zoneExtrinsicSignature = '';
     this.zoneRenderOffset = 0.002;
 
@@ -23,7 +24,7 @@ export class Lidar3D {
     this.camera = new THREE.PerspectiveCamera(50, 1, 0.01, 2000);
     this.camera.up.set(0, 0, 1);
     this.renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
-    this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     
     this.renderer.domElement.style.pointerEvents = 'auto';
     this.renderer.domElement.style.position = 'absolute';
@@ -44,16 +45,16 @@ export class Lidar3D {
     this.axes = new THREE.AxesHelper(this.baseAxesSize);
     this.scene.add(this.axes);
 
-        // Group quản lý Zone
+    // Group quan ly Zone
     this.zoneGroup = new THREE.Group();
     this.zoneGroup.name = 'zones';
     this.scene.add(this.zoneGroup);
 
-    // === Muc tieu chuyen dong (targets) + canh bao 3D ===
+    // Muc tieu chuyen dong (targets) va canh bao 3D
     this.targetGroup = new THREE.Group();
     this.targetGroup.name = 'targets';
     this.scene.add(this.targetGroup);
-    this.targetMeshes = new Map(); // targetId -> { group, fill, edges, label }
+    this.targetMeshes = new Map();
     this.alarmActive = false;
 
     this.alarmBanner = document.createElement('div');
@@ -63,7 +64,7 @@ export class Lidar3D {
       borderRadius: '4px', zIndex: 6, display: 'none', fontSize: '14px',
       boxShadow: '0 2px 8px rgba(0,0,0,.4)'
     });
-    this.alarmBanner.textContent = '⚠ CẢNH BÁO: PHÁT HIỆN CHUYỂN ĐỘNG TRONG VÙNG';
+    this.alarmBanner.textContent = 'CANH BAO: PHAT HIEN CHUYEN DONG TRONG VUNG';
     host.appendChild(this.alarmBanner);
 
     this.axisLabels = {};
@@ -81,7 +82,7 @@ export class Lidar3D {
     this.distanceInfoAllEl = document.getElementById('distanceInfoAllPanel') || document.getElementById('distanceInfoAll');
     this.distanceUpdateTimeEl = document.getElementById('distanceUpdateTime');
 
-    // Raycaster cho tương tác 3D
+    // Raycaster cho tuong tac chuot 3D
     this.raycaster = new THREE.Raycaster();
     this.mouse = new THREE.Vector2();
     this.groundPlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
@@ -96,12 +97,15 @@ export class Lidar3D {
     this.renderer.domElement.addEventListener('contextmenu', (e) => this.onCanvasRightClick(e));
   }
 
-  // === CÁC HÀM XỬ LÝ ZONE 3D TỪ CODE 1 ===
+  // Lay thong so extrinsic theo sourceId
   extrinsicFor(sourceId, extrinsics) {
+    if (!Array.isArray(extrinsics)) return {};
     return extrinsics.find(e => e?.id === sourceId) || extrinsics[sourceId] || {};
   }
 
+  // Chuan hoa cac thong so extrinsic
   zoneExtrinsic(e) {
+    if (!e) return { ox: 0, oy: 0, oz: 0, roll: 0, pitch: 0, oth: 0 };
     return {
       ox: +(e.x ?? e.dx) || 0,
       oy: +(e.y ?? e.dy) || 0,
@@ -112,7 +116,17 @@ export class Lidar3D {
     };
   }
 
+  // Chuyen toa do World sang toa do Local cua LiDAR
+  worldToLocal2D(wx, wy, sourceId, extrinsics) {
+    const e = this.zoneExtrinsic(this.extrinsicFor(sourceId, extrinsics));
+    const dx = wx - e.ox, dy = wy - e.oy;
+    const ct = Math.cos(e.oth), st = Math.sin(e.oth);
+    return [dx * ct + dy * st, -dx * st + dy * ct];
+  }
+
+  // Lay danh sach cac diem dinh cua Zone theo kieu hinh
   zonePoints(zone) {
+    if (!zone) return [];
     if (zone.type === 0) return [[zone.x1, zone.y1], [zone.x2, zone.y1], [zone.x2, zone.y2], [zone.x1, zone.y2]];
     if (zone.type === 1 || zone.type === 4) return zone.vertices || [];
     if (zone.type === 2) return Array.from({ length: 64 }, (_, i) => {
@@ -120,7 +134,7 @@ export class Lidar3D {
       return [zone.cx + zone.radius * Math.cos(a), zone.cy + zone.radius * Math.sin(a)];
     });
     if (zone.type === 3) {
-      const points = [[zone.sx, zone.sy]], a1 = zone.sAngleStart * Math.PI / 180, a2 = zone.sAngleEnd * Math.PI / 180;
+      const points = [[zone.sx, zone.sy]], a1 = (zone.sAngleStart || 0) * Math.PI / 180, a2 = (zone.sAngleEnd || 0) * Math.PI / 180;
       const span = ((a2 - a1 + Math.PI * 2) % (Math.PI * 2)) || Math.PI * 2;
       for (let i = 0; i <= 48; i++) {
         const a = a1 + span * i / 48;
@@ -131,6 +145,7 @@ export class Lidar3D {
     return [];
   }
 
+  // Xoa toan bo mesh cua zone trong group
   clearZones() {
     for (const child of [...this.zoneGroup.children]) {
       this.zoneGroup.remove(child);
@@ -138,53 +153,138 @@ export class Lidar3D {
     }
   }
 
+  // Cap nhat danh sach zone tu frontend
   setZones(zones, extrinsics = []) {
-    this.zones = zones.map(z => ({ ...z, vertices: z.vertices?.map(p => [+p[0], +p[1]]) }));
+    this.zones = (zones || []).map(z => ({ ...z, vertices: z.vertices?.map(p => [+p[0], +p[1]]) }));
     this.rebuildZones(extrinsics);
   }
 
+  // Dung lai hien thi zone trong khong gian 3D
   rebuildZones(extrinsics = []) {
     this.clearZones();
+    if (!this.zones || !this.zones.length) return;
+
+    const currentExtr = Array.isArray(extrinsics) && extrinsics.length > 0 
+      ? extrinsics 
+      : (window.extrinsics || []);
+
+    const count = window.lidarCount || (currentExtr.length > 0 ? currentExtr.length : 1);
+
     for (const zone of this.zones) {
       const local = zone.scope === 'local';
       const rawSourceId = Number(zone.sourceId ?? zone.panel ?? zone.li ?? 0);
       const sourceId = Number.isInteger(rawSourceId) && rawSourceId >= 0 ? rawSourceId : 0;
-      const e = local ? this.zoneExtrinsic(this.extrinsicFor(sourceId, extrinsics)) : null;
-      const r = local ? LidarProtocol.rotation(e) : null;
-      const normal = local ? [r[2], r[5], r[8]] : [0, 0, 1];
 
-      const points = this.zonePoints(zone).map(([x, y]) => {
-        const p = local ? LidarProtocol.localPointToWorld3D(e, +x, +y, 0) : [+x, +y, 0];
-        return new THREE.Vector3(
-          p[0] + normal[0] * this.zoneRenderOffset,
-          p[1] + normal[1] * this.zoneRenderOffset,
-          p[2] + normal[2] * this.zoneRenderOffset
-        );
-      });
+      // Local: chi ve o LiDAR so huu. Fusion: chieu len tat ca LiDAR
+      const targetLidarIds = local 
+        ? [sourceId] 
+        : Array.from({ length: count }, (_, i) => i);
 
-      if (points.length < 2 || points.some(p => !Number.isFinite(p.x + p.y + p.z))) continue;
-      const geometry = new THREE.BufferGeometry().setFromPoints(points);
-      const color = local ? this.palette[((sourceId % this.palette.length) + this.palette.length) % this.palette.length] : '#d62728';
-      const material = new THREE.LineBasicMaterial({ color, depthTest: true, transparent: true, opacity: 0.95 });
-      const line = new THREE.LineLoop(geometry, material);
-      line.userData = { zoneId: zone.id, scope: zone.scope, sourceId: local ? sourceId : null };
-      line.renderOrder = 2;
-      this.zoneGroup.add(line);
+      const levelRings = [];
+
+      for (const lid of targetLidarIds) {
+        const e = this.zoneExtrinsic(this.extrinsicFor(lid, currentExtr));
+        const r = typeof LidarProtocol !== 'undefined' && LidarProtocol.rotation ? LidarProtocol.rotation(e) : [1,0,0, 0,1,0, 0,0,1];
+        const normal = [r[2] || 0, r[5] || 0, r[8] || 1];
+
+        const rawPts = this.zonePoints(zone);
+        if (!rawPts || rawPts.length < 2) continue;
+
+        const points = rawPts.map(([x, y]) => {
+          let px, py, pz;
+          if (local) {
+            const worldP = (typeof LidarProtocol !== 'undefined' && LidarProtocol.localPointToWorld3D)
+              ? LidarProtocol.localPointToWorld3D(e, +x, +y, 0)
+              : [+x, +y, 0];
+            px = worldP[0]; py = worldP[1]; pz = worldP[2];
+          } else {
+            px = +x; py = +y;
+            pz = e.oz + (px - e.ox) * Math.tan(e.pitch) - (py - e.oy) * Math.tan(e.roll);
+            if (!Number.isFinite(pz)) pz = e.oz;
+          }
+
+          return new THREE.Vector3(
+            px + normal[0] * this.zoneRenderOffset,
+            py + normal[1] * this.zoneRenderOffset,
+            pz + normal[2] * this.zoneRenderOffset
+          );
+        });
+
+        if (points.length < 2 || points.some(p => !Number.isFinite(p.x + p.y + p.z))) continue;
+        levelRings.push(points);
+
+        const geometry = new THREE.BufferGeometry().setFromPoints(points);
+        const color = local 
+          ? this.palette[((sourceId % this.palette.length) + this.palette.length) % this.palette.length] 
+          : '#ff3344';
+
+        const material = new THREE.LineBasicMaterial({ 
+          color, 
+          depthTest: true, 
+          transparent: true, 
+          opacity: 0.95,
+          linewidth: 2 
+        });
+
+        const line = new THREE.LineLoop(geometry, material);
+        line.userData = { zoneId: zone.id, scope: zone.scope, sourceId: local ? sourceId : null };
+        line.renderOrder = 2;
+        this.zoneGroup.add(line);
+      }
+
+      // Noi cac tang cao do tao lang tru 3D neu la Fusion va co tu 2 LiDAR tro len
+      if (!local && levelRings.length >= 2) {
+        levelRings.sort((a, b) => (a[0]?.z || 0) - (b[0]?.z || 0));
+        const bottomRing = levelRings[0];
+        const topRing = levelRings[levelRings.length - 1];
+
+        const step = (zone.type === 2 || zone.type === 3) ? 8 : 1;
+        const verticalLinesPts = [];
+
+        for (let i = 0; i < bottomRing.length; i += step) {
+          if (topRing[i]) {
+            verticalLinesPts.push(bottomRing[i]);
+            verticalLinesPts.push(topRing[i]);
+          }
+        }
+
+        if (verticalLinesPts.length > 0) {
+          const vertGeometry = new THREE.BufferGeometry().setFromPoints(verticalLinesPts);
+          const vertMaterial = new THREE.LineBasicMaterial({
+            color: '#ff6677',
+            transparent: true,
+            opacity: 0.75,
+            depthTest: true
+          });
+          const vertLines = new THREE.LineSegments(vertGeometry, vertMaterial);
+          vertLines.renderOrder = 2;
+          this.zoneGroup.add(vertLines);
+        }
+      }
     }
   }
 
-  // === TƯƠNG TÁC CANVAS (RULER / PICK / ZONE) ===
+  // Xu ly click chuot trai tren canvas 3D
   onCanvasClick(event) {
     if (event.target !== this.renderer.domElement) return;
     const rect = this.renderer.domElement.getBoundingClientRect();
     this.mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
     this.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
     this.raycaster.setFromCamera(this.mouse, this.camera);
+
+    // Bat tia chuot vao dung do cao Z cua LiDAR dang chon
+    const selId = window.selLidar ?? 0;
+    const currentExtr = this.extrinsicFor(selId, this.extrinsics || []);
+    const currentZ = +(currentExtr.z ?? 0);
+
+    const activePlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), -currentZ);
     const intersectPoint = new THREE.Vector3();
-    this.raycaster.ray.intersectPlane(this.groundPlane, intersectPoint);
+    this.raycaster.ray.intersectPlane(activePlane, intersectPoint);
     if (!intersectPoint) return;
+
     const wx = intersectPoint.x;
     const wy = intersectPoint.y;
+
     if (window.rulerMode) {
       this.handleRuler(wx, wy);
     } else if (window.pickMode) {
@@ -194,6 +294,7 @@ export class Lidar3D {
     }
   }
 
+  // Xu ly click chuot phai de hoan tat polygon hoac freehand
   onCanvasRightClick(event) {
     event.preventDefault();
     if (window.zoneMode && (window.zoneTool === 'polygon' || window.zoneTool === 'freehand')) {
@@ -201,17 +302,19 @@ export class Lidar3D {
     }
   }
 
+  // Thuoc do khoang cach trong 3D
   handleRuler(wx, wy) {
     this.rulerPoints.push([wx, wy]);
     if (this.rulerPoints.length === 2) {
       const p1 = this.rulerPoints[0];
       const p2 = this.rulerPoints[1];
       const dist = Math.hypot(p2[0] - p1[0], p2[1] - p1[1]);
-      alert(`Khoảng cách: ${dist.toFixed(2)} m`);
+      alert(`Khoang cach: ${dist.toFixed(2)} m`);
       this.rulerPoints = [];
     }
   }
 
+  // Chuc nang Pick diem calib trong 3D
   handlePick(wx, wy) {
     if (this.pickRef.length < 2) {
       this.pickRef.push({ x: wx, y: wy });
@@ -234,17 +337,25 @@ export class Lidar3D {
     }
   }
 
+  // Xu ly ve zone theo hinh
   handleZone(wx, wy) {
     const scope = document.getElementById('zoneScope')?.value || 'fusion';
+    const sourceId = window.selLidar ?? 0;
+    const toLocal = (x, y) => scope === 'local'
+      ? this.worldToLocal2D(x, y, sourceId, this.extrinsics || [])
+      : [x, y];
+
     const tool = window.zoneTool;
     if (tool === 'rect') {
       if (!this.zoneTemp) {
         this.zoneTemp = { x1: wx, y1: wy };
       } else {
+        const [lx1, ly1] = toLocal(this.zoneTemp.x1, this.zoneTemp.y1);
+        const [lx2, ly2] = toLocal(wx, wy);
         const zone = {
-          type: 0, scope, id: Date.now(),
-          x1: Math.min(this.zoneTemp.x1, wx), y1: Math.min(this.zoneTemp.y1, wy),
-          x2: Math.max(this.zoneTemp.x1, wx), y2: Math.max(this.zoneTemp.y1, wy)
+          type: 0, scope, sourceId: scope === 'local' ? sourceId : null, id: Date.now(),
+          x1: Math.min(lx1, lx2), y1: Math.min(ly1, ly2),
+          x2: Math.max(lx1, lx2), y2: Math.max(ly1, ly2)
         };
         this.sendZoneToBackend(zone);
         this.zoneTemp = null;
@@ -253,8 +364,13 @@ export class Lidar3D {
       if (!this.zoneTemp) {
         this.zoneTemp = { cx: wx, cy: wy };
       } else {
-        const radius = Math.hypot(wx - this.zoneTemp.cx, wy - this.zoneTemp.cy);
-        const zone = { type: 2, scope, id: Date.now(), cx: this.zoneTemp.cx, cy: this.zoneTemp.cy, radius };
+        const [lcx, lcy] = toLocal(this.zoneTemp.cx, this.zoneTemp.cy);
+        const [lwx, lwy] = toLocal(wx, wy);
+        const radius = Math.hypot(lwx - lcx, lwy - lcy);
+        const zone = { 
+          type: 2, scope, sourceId: scope === 'local' ? sourceId : null, 
+          id: Date.now(), cx: lcx, cy: lcy, radius 
+        };
         this.sendZoneToBackend(zone);
         this.zoneTemp = null;
         window.zoneMode = false;
@@ -269,11 +385,14 @@ export class Lidar3D {
         this.zoneTemp.step = 1;
       } else {
         const angleEnd = Math.atan2(wy - this.zoneTemp.sy, wx - this.zoneTemp.sx) * 180 / Math.PI;
+        const [lsx, lsy] = toLocal(this.zoneTemp.sx, this.zoneTemp.sy);
+        const deltaTheta = scope === 'local' ? (this.zoneExtrinsic(this.extrinsicFor(sourceId, this.extrinsics || [])).oth * 180 / Math.PI) : 0;
         const zone = {
-          type: 3, scope, id: Date.now(),
-          sx: this.zoneTemp.sx, sy: this.zoneTemp.sy,
+          type: 3, scope, sourceId: scope === 'local' ? sourceId : null, id: Date.now(),
+          sx: lsx, sy: lsy,
           sRadius: this.zoneTemp.radius,
-          sAngleStart: this.zoneTemp.angleStart, sAngleEnd: angleEnd
+          sAngleStart: this.zoneTemp.angleStart - deltaTheta, 
+          sAngleEnd: angleEnd - deltaTheta
         };
         this.sendZoneToBackend(zone);
         this.zoneTemp = null;
@@ -282,17 +401,21 @@ export class Lidar3D {
       }
     } else if (tool === 'polygon' || tool === 'freehand') {
       this.zoneTempVertices.push([wx, wy]);
-      console.log(`[Zone 3D] Thêm đỉnh: ${wx.toFixed(2)}, ${wy.toFixed(2)}`);
     }
   }
 
+  // Hoan thanh ve polygon hoac freehand
   finishZone() {
     if ((window.zoneTool === 'polygon' || window.zoneTool === 'freehand') && this.zoneTempVertices.length >= 3) {
       const scope = document.getElementById('zoneScope')?.value || 'fusion';
+      const sourceId = window.selLidar ?? 0;
+      const vertices = scope === 'local'
+        ? this.zoneTempVertices.map(([x, y]) => this.worldToLocal2D(x, y, sourceId, this.extrinsics || []))
+        : this.zoneTempVertices;
       const zone = {
         type: window.zoneTool === 'freehand' ? 4 : 1,
-        scope, id: Date.now(),
-        vertices: this.zoneTempVertices
+        scope, sourceId: scope === 'local' ? sourceId : null,
+        id: Date.now(), vertices
       };
       this.sendZoneToBackend(zone);
     }
@@ -303,12 +426,18 @@ export class Lidar3D {
     document.querySelectorAll('#zoneToolbar button').forEach(b => b.classList.remove('active'));
   }
 
+  // Gui zone vua tao len backend WebSocket
   sendZoneToBackend(newZone) {
     window.zones = window.zones || [];
     newZone.id = window.zoneNextId++;
     window.zones.push(newZone);
     const arr = window.zones.map(z => {
-      const o = { scope: z.scope || 'fusion', id: z.id, type: z.type };
+      const o = { 
+        scope: z.scope || 'fusion', 
+        id: z.id,
+        sourceId: z.scope === 'local' ? (z.sourceId ?? 0) : null,
+        type: z.type 
+      };
       if (z.type === 0) { o.x1 = z.x1; o.y1 = z.y1; o.x2 = z.x2; o.y2 = z.y2; }
       else if (z.type === 1 || z.type === 4) { o.vertices = z.vertices; }
       else if (z.type === 2) { o.cx = z.cx; o.cy = z.cy; o.radius = z.radius; }
@@ -318,21 +447,23 @@ export class Lidar3D {
     if (window.send) {
       window.send({ cmd: 'zones_set', zones: arr });
     }
-    console.log('[Zone 3D] Đã gửi zone lên backend. Tổng zones:', window.zones.length);
+    this.setZones(window.zones, this.extrinsics);
   }
 
+  // Tao nhan chu text 2D tren nen Sprite trong 3D
   label(text, color) {
     const c = document.createElement('canvas');
     c.width = 512; c.height = 64;
     const g = c.getContext('2d');
     g.font = '28px sans-serif';
     g.fillStyle = color;
-    g.fillText(text.slice(0, 32), 8, 42);
+    g.fillText((text || '').slice(0, 32), 8, 42);
     const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), depthTest: false }));
     sprite.scale.set(2.8, 0.35, 1);
     return sprite;
   }
 
+  // Cac goc quay camera co san
   preset(name) {
     const pos = { Top: [0, 0, 80], Front: [0, -80, 1], Side: [80, 0, 1], Perspective: [50, -50, 50] }[name] || [50, -50, 50];
     this.camera.up.set(...(name === 'Top' ? [0, 1, 0] : [0, 0, 1]));
@@ -341,6 +472,7 @@ export class Lidar3D {
     this.controls.update();
   }
 
+  // Dieu chinh kich thuoc canvas khi thay doi man hinh
   resize() {
     const w = this.host.clientWidth, h = this.host.clientHeight;
     if (!w || !h) return;
@@ -349,6 +481,7 @@ export class Lidar3D {
     this.camera.updateProjectionMatrix();
   }
 
+  // Tao layer hien thi cho tung LiDAR
   makeLayer(id, name) {
     const color = this.palette[id % this.palette.length];
     const group = new THREE.Group();
@@ -405,7 +538,9 @@ export class Lidar3D {
     return layer;
   }
 
+  // Giai phong tai nguyen Three.js
   disposeObject(obj) {
+    if (!obj) return;
     obj.traverse(o => {
       o.geometry?.dispose();
       if (o.material) {
@@ -417,6 +552,7 @@ export class Lidar3D {
     });
   }
 
+  // Xoa layer cua LiDAR
   removeLayer(id) {
     const l = this.layers.get(id);
     if (!l) return;
@@ -426,11 +562,13 @@ export class Lidar3D {
     this.layers.delete(id);
   }
 
+  // Xoa toan bo du lieu va layer
   clear() {
     this.fusion.clear();
     for (const id of [...this.layers.keys()]) this.removeLayer(id);
   }
 
+  // Cap nhat bang thong tin chi tiet cac LiDAR
   updateDistanceInfoAll() {
     if (!this.distanceInfoAllEl) return;
     const cameraPos = this.camera.position;
@@ -462,13 +600,13 @@ export class Lidar3D {
           if (typeof frame.aMin === 'number' && typeof frame.aMax === 'number') {
             const aMinDeg = (frame.aMin * 180 / Math.PI).toFixed(1);
             const aMaxDeg = (frame.aMax * 180 / Math.PI).toFixed(1);
-            scanAngle = `${((frame.aMax - frame.aMin) * 180 / Math.PI).toFixed(1)}° (${aMinDeg}°→${aMaxDeg}°)`;
+            scanAngle = `${((frame.aMax - frame.aMin) * 180 / Math.PI).toFixed(1)}° (${aMinDeg}°->${aMaxDeg}°)`;
           }
           const ageMs = Math.round(age);
-          lastUpdate = ageMs < 100 ? 'vừa xong' : `${ageMs} ms trước`;
+          lastUpdate = ageMs < 100 ? 'vua xong' : `${ageMs} ms truoc`;
         } else {
           status = 'stale'; statusColor = '#ffd43b'; statusIcon = '◐';
-          pts = frame.n || 0; lastUpdate = `${Math.round(age)} ms trước`;
+          pts = frame.n || 0; lastUpdate = `${Math.round(age)} ms truoc`;
         }
       }
 
@@ -485,27 +623,27 @@ export class Lidar3D {
               <span style="color: ${statusColor}; font-size: 10px; font-weight: 600; text-transform: uppercase;">${statusIcon} ${status}</span>
           </div>
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px 8px;">
-              <div><span style="color: #94a3b8;">📍 Vị trí (X,Y,Z):</span><br><span style="color: #e2e8f0; font-family: monospace; font-size: 10px;">${sensorPos.x.toFixed(2)}, ${sensorPos.y.toFixed(2)}, ${sensorPos.z.toFixed(2)} m</span></div>
-              <div><span style="color: #94a3b8;"> Cam → LiDAR:</span><br><span style="color: #e2e8f0; font-family: monospace; font-size: 10px;">${camDist.toFixed(2)} m</span></div>
-              <div><span style="color: #94a3b8;"> Gần nhất:</span><br><span style="color: #e2e8f0; font-family: monospace; font-size: 10px;">${rMin}</span></div>
-              <div><span style="color: #94a3b8;">🎯 Xa nhất:</span><br><span style="color: #e2e8f0; font-family: monospace; font-size: 10px;">${rMax}</span></div>
-              <div style="grid-column: span 2;"><span style="color: #94a3b8;">📐 Góc quét:</span><span style="color: #e2e8f0; font-family: monospace; font-size: 10px; margin-left: 4px;">${scanAngle}</span></div>
-              <div><span style="color: #94a3b8;"> Điểm/frame:</span><br><span style="color: #e2e8f0; font-family: monospace; font-size: 10px;">${pts.toLocaleString()}</span></div>
-              <div><span style="color: #94a3b8;">🕐 Cập nhật:</span><br><span style="color: #e2e8f0; font-family: monospace; font-size: 10px;">${lastUpdate}</span></div>
-              ${distToFirst ? `<div style="grid-column: span 2;"><span style="color: #94a3b8;">🔗 Cách LiDAR #1:</span><span style="color: #e2e8f0; font-family: monospace; font-size: 10px; margin-left: 4px;">${distToFirst}</span></div>` : ''}
+              <div><span style="color: #94a3b8;">Vi tri (X,Y,Z):</span><br><span style="color: #e2e8f0; font-family: monospace; font-size: 10px;">${sensorPos.x.toFixed(2)}, ${sensorPos.y.toFixed(2)}, ${sensorPos.z.toFixed(2)} m</span></div>
+              <div><span style="color: #94a3b8;"> Cam -> LiDAR:</span><br><span style="color: #e2e8f0; font-family: monospace; font-size: 10px;">${camDist.toFixed(2)} m</span></div>
+              <div><span style="color: #94a3b8;"> Gan nhat:</span><br><span style="color: #e2e8f0; font-family: monospace; font-size: 10px;">${rMin}</span></div>
+              <div><span style="color: #94a3b8;"> Xa nhat:</span><br><span style="color: #e2e8f0; font-family: monospace; font-size: 10px;">${rMax}</span></div>
+              <div style="grid-column: span 2;"><span style="color: #94a3b8;"> Goc quet:</span><span style="color: #e2e8f0; font-family: monospace; font-size: 10px; margin-left: 4px;">${scanAngle}</span></div>
+              <div><span style="color: #94a3b8;"> Diem/frame:</span><br><span style="color: #e2e8f0; font-family: monospace; font-size: 10px;">${pts.toLocaleString()}</span></div>
+              <div><span style="color: #94a3b8;"> Cap nhat:</span><br><span style="color: #e2e8f0; font-family: monospace; font-size: 10px;">${lastUpdate}</span></div>
+              ${distToFirst ? `<div style="grid-column: span 2;"><span style="color: #94a3b8;"> Cach LiDAR #1:</span><span style="color: #e2e8f0; font-family: monospace; font-size: 10px; margin-left: 4px;">${distToFirst}</span></div>` : ''}
           </div></div>`;
     }
 
     if (hasAnyData) {
       html = `<div style="background: rgba(59, 130, 246, 0.15); border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 4px; padding: 6px 8px; margin-bottom: 8px; font-size: 11px;">
           <div style="display: flex; justify-content: space-between; align-items: center;">
-              <span style="color: #93c5fd; font-weight: 600;">📊 TỔNG HỆ THỐNG</span>
+              <span style="color: #93c5fd; font-weight: 600;"> TONG HE THONG</span>
               <span style="color: ${totalOnline > 0 ? '#51cf66' : '#ff6b6b'}; font-weight: 600;">${totalOnline}/${this.layers.size} online</span>
           </div>
-          <div style="color: #e2e8f0; font-family: monospace; font-size: 10px; margin-top: 4px;">Tổng điểm: <strong>${totalPoints.toLocaleString()}</strong> pts/frame</div>
+          <div style="color: #e2e8f0; font-family: monospace; font-size: 10px; margin-top: 4px;">Tong diem: <strong>${totalPoints.toLocaleString()}</strong> pts/frame</div>
       </div>` + html;
     } else {
-      html = '<div style="color:#94a3b8;padding:8px;text-align:center;">Đang chờ kết nối LiDAR...</div>';
+      html = '<div style="color:#94a3b8;padding:8px;text-align:center;">Dang cho ket noi LiDAR...</div>';
     }
 
     this.distanceInfoAllEl.innerHTML = html;
@@ -514,12 +652,13 @@ export class Lidar3D {
     }
   }
 
+  // Cap nhat bounding box 3D cua muc tieu chuyen dong
   updateTargets(ev) {
     const targets = (ev && ev.targets) || [];
     const seen = new Set();
     
     for (const t of targets) {
-      if (t.age < 3) continue; // giong nguong PERSISTENCE_FRAMES ben C++, bo qua khi chua xac nhan
+      if (t.age < 3) continue;
       seen.add(t.id);
 
       const confirmed = t.age >= 3;
@@ -538,17 +677,14 @@ export class Lidar3D {
         group.add(fill); group.add(edges);
         const label = this.label('#' + t.id, '#c00');
         this.targetGroup.add(group);
-        this.targetGroup.add(label); // label khong bi anh huong boi scale cua group
+        this.targetGroup.add(label);
         entry = { group, fill, edges, label };
         this.targetMeshes.set(t.id, entry);
       }
 
-      // t.x, t.y la toa do THE GIOI - dung truc tiep vi scene 3D la khung Fusion
-            // t.x, t.y, t.z1/t.z2 la toa do THE GIOI thuc te (backend tinh tu diem that,
-      // tu dong dung theo do cao lap dat cua LiDAR, khong con hardcode)
       const zLo = Number.isFinite(t.z1) ? t.z1 : 0;
       const zHi = Number.isFinite(t.z2) ? t.z2 : zLo + 1.6;
-      const h3 = Math.max(zHi - zLo, 0.3); // toi thieu 0.3m de luon thay ro khung
+      const h3 = Math.max(zHi - zLo, 0.3);
       entry.group.position.set(t.x, t.y, (zLo + zHi) / 2);
       entry.group.scale.set(Math.max(t.w, 0.1), Math.max(t.h, 0.1), h3);
       entry.label.position.set(t.x, t.y, zHi + 0.3);
@@ -571,30 +707,35 @@ export class Lidar3D {
     this.alarmBanner.style.display = this.alarmActive ? 'block' : 'none';
   }
 
-    update(names, extrinsics, paused, ev) {
+  // Vong lap render cap nhat moi frame
+  update(names, extrinsics, paused, ev) {
     if (!this.enabled) return;
+    this.extrinsics = extrinsics || [];
 
-    // Kiếm tra sự thay đổi Extrinsics để tự động vẽ lại Zone (Nhận từ Code 1)
-    const zoneSig = JSON.stringify(extrinsics.map(e => e && [e.id, e.x ?? e.dx, e.y ?? e.dy, e.z, e.roll, e.pitch, e.yaw ?? e.thetaDeg]));
+    const zoneSig = JSON.stringify((extrinsics || []).map(e => e && [e.id, e.x ?? e.dx, e.y ?? e.dy, e.z, e.roll, e.pitch, e.yaw ?? e.thetaDeg]));
     if (zoneSig !== this.zoneExtrinsicSignature) {
       this.zoneExtrinsicSignature = zoneSig;
       this.rebuildZones(extrinsics);
     }
 
-    const state = this.fusion.select(names.length, performance.now(), paused);
+    const count = (names && names.length) || window.lidarCount || 1;
+    const state = this.fusion.select(count, performance.now(), paused);
     let total = 0, online = 0;
 
     for (const id of [...this.layers.keys()]) {
-      if (id >= names.length) this.removeLayer(id);
+      if (id >= count) this.removeLayer(id);
     }
 
-    // Auto-scale Grid và Axes
     let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, minZ = Infinity, maxZ = -Infinity;
-    for (const id in extrinsics) {
-      const e = extrinsics[id];
-      if (e.x < minX) minX = e.x; if (e.x > maxX) maxX = e.x;
-      if (e.y < minY) minY = e.y; if (e.y > maxY) maxY = e.y;
-      if (e.z < minZ) minZ = e.z; if (e.z > maxZ) maxZ = e.z;
+    if (extrinsics) {
+      for (const id in extrinsics) {
+        const e = extrinsics[id];
+        if (!e) continue;
+        const ex = +(e.x ?? e.dx ?? 0), ey = +(e.y ?? e.dy ?? 0), ez = +(e.z ?? 0);
+        if (ex < minX) minX = ex; if (ex > maxX) maxX = ex;
+        if (ey < minY) minY = ey; if (ey > maxY) maxY = ey;
+        if (ez < minZ) minZ = ez; if (ez > maxZ) maxZ = ez;
+      }
     }
 
     if (minX === Infinity) { minX = -10; maxX = 10; minY = -10; maxY = 10; minZ = 0; maxZ = 10; }
@@ -603,13 +744,13 @@ export class Lidar3D {
     this.grid.scale.setScalar(maxSpan / this.baseGridSize);
     this.axes.scale.setScalar(maxSpan / this.baseAxesSize);
     const labelOffset = maxSpan + 1.5;
-    this.axisLabels['X'].position.set(labelOffset, 0, 0);
-    this.axisLabels['Y'].position.set(0, labelOffset, 0);
-    this.axisLabels['Z'].position.set(0, 0, labelOffset);
+    if (this.axisLabels['X']) this.axisLabels['X'].position.set(labelOffset, 0, 0);
+    if (this.axisLabels['Y']) this.axisLabels['Y'].position.set(0, labelOffset, 0);
+    if (this.axisLabels['Z']) this.axisLabels['Z'].position.set(0, 0, labelOffset);
 
     for (const entry of state.layers) {
       const { id, frame: f, stale, delta } = entry;
-      const name = names[id] || 'LiDAR ' + (id + 1);
+      const name = (names && names[id]) || 'LiDAR ' + (id + 1);
       const l = this.layers.get(id) || this.makeLayer(id, name);
 
       if (l.name !== name) {
@@ -618,7 +759,7 @@ export class Lidar3D {
         l.group.add(l.label); l.name = name;
       }
 
-      const e = extrinsics[id] || {};
+      const e = (extrinsics && extrinsics[id]) || {};
       const ox = f?.ox ?? e.x ?? e.dx ?? 0;
       const oy = f?.oy ?? e.y ?? e.dy ?? 0;
       const oz = f?.oz ?? e.z ?? 0;
@@ -672,11 +813,14 @@ export class Lidar3D {
       l.text.style.color = stale ? '#a33' : this.palette[id % this.palette.length];
     }
 
-    document.getElementById('fusionSummary').textContent =
-      `LiDAR online: ${online}/${names.length} | Total points: ${total}\n` +
-      `Fusion timestamp: ${state.timestamp === null ? '—' : state.timestamp.toFixed(3) + ' ms'}\n` +
-      `Max timestamp delta: ${state.maxDelta.toFixed(1)} ms\n` +
-      `Grid: Auto-scaled • Z up • Drag: rotate • Right drag: pan • Wheel: zoom`;
+    const summaryEl = document.getElementById('fusionSummary');
+    if (summaryEl) {
+      summaryEl.textContent =
+        `LiDAR online: ${online}/${count} | Total points: ${total}\n` +
+        `Fusion timestamp: ${state.timestamp === null ? '—' : state.timestamp.toFixed(3) + ' ms'}\n` +
+        `Max timestamp delta: ${state.maxDelta.toFixed(1)} ms\n` +
+        `Grid: Auto-scaled • Z up • Drag: rotate • Right drag: pan • Wheel: zoom`;
+    }
 
     this.updateTargets(ev);
     this.updateDistanceInfoAll();
@@ -684,7 +828,8 @@ export class Lidar3D {
     this.renderer.render(this.scene, this.camera);
   }
 
-    dispose() {
+  // Giai phong toan bo khi thoat
+  dispose() {
     this.observer.disconnect();
     this.controls.dispose();
     this.clearZones();
